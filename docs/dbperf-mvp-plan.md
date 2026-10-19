@@ -38,8 +38,10 @@
 
 1. **Снимки** (`pg_stat_activity`, `pg_locks`, `pg_stat_replication`, `pg_replication_slots`,
    `pg_stat_progress_*`): между опросами события теряются, поэтому опрашивать нужно часто
-   (5–15 с), а хранить в основном агрегаты (счётчики по состояниям, max/sum ожиданий) плюс
-   выборочно сырые строки (сеансы дольше порога).
+   (5–15 с). Строки снимка сохраняются как есть, одна строка ClickHouse на одну строку
+   представления; счётчики по состояниям, ожиданиям и максимальные длительности считают
+   materialized views, а не коллектор. Это проще всего реализовать и отлаживать, а объём
+   (сотни подключений × тик в 10 с) для ClickHouse незначителен.
 2. **Накопительные счётчики** (`pg_stat_database`, `pg_stat_statements`, `pg_stat_*_tables`,
    `pg_stat_bgwriter`, `pg_stat_wal`, …): интересны только дельты. Абсолютные значения
    нужны для сверки и для восстановления после сброса (`stats_reset`, перезапуск сервера,
@@ -123,18 +125,37 @@ temporary file, automatic vacuum of table), `EXPLAIN` конкретных за�
 
 | № | Запрос | Что пишем в ClickHouse | Примечание |
 |---|---|---|---|
-| A1 | 1.7 состояния с `waiting` | `metrics`: `activity.sessions{state}` | один запрос, 4–5 строк |
-| A2 | 1.6 события ожидания | `metrics`: `activity.waits{type,event}` | только `client backend` |
-| A3 | 1.8 длительности (с `WHERE > порог`, например 1 с) | `sessions`: сырые строки долгих сеансов; `metrics`: `activity.max_age{state}` для `active`, `idle in transaction`, `waiting` | порог и лимит строк из конфигурации |
-| A4 | 1.11 сводка ожиданий блокировок (`waitstart`, 14+) | `metrics`: `locks.waiting`, `locks.max_wait`, `locks.sum_wait` | для < 14 — вариант 1.12 |
-| A5 | 1.1 `numbackends` по базам | `metrics`: `db.backends{datname}` | дёшево, из `pg_stat_database` |
-| A6 | 6.1 отставание реплик (только на primary) | `replication`: по строке на walsender | |
-| A7 | 6.3 слоты репликации | `replication_slots`: по строке на слот | |
-| A8 | 7.9 активные очистки (`pg_stat_progress_vacuum` + activity) | `vacuum_progress`: по строке на процесс | пусто большую часть времени |
-| A9 | на реплике: 6.2 `pg_last_wal_*`, `pg_last_xact_replay_timestamp` | `metrics`: `recovery.replay_delay`, `recovery.replay_backlog` | вместо A6 |
+| A1 | полный снимок `pg_stat_activity` (все строки, включая фоновые процессы) с вычисленными возрастами и признаком ожидания блокировки | `pg_stat_activity`: одна строка на процесс | единственный запрос к представлению за тик; запросы 1.5–1.8 книги становятся запросами к ClickHouse |
+| A2 | 1.10 ожидающие блокировки из `pg_locks` (`NOT granted`, с `waitstart`, 14+) | `pg_locks_waiting`: одна строка на ожидаемую блокировку | для < 14 без `waitstart`, длительность считается по `state_change` из A1 |
+| A3 | 6.1 отставание реплик (только на primary) | `replication`: по строке на walsender | |
+| A4 | 6.3 слоты репликации | `replication_slots`: по строке на слот | |
+| A5 | `pg_stat_progress_vacuum` как есть | `pg_stat_progress_vacuum`: по строке на процесс | расшифровка через JOIN с `pg_stat_activity` по `(ts, pid)` в ClickHouse |
+| A6 | на реплике: 6.2 `pg_last_wal_*`, `pg_last_xact_replay_timestamp` | `metrics`: `recovery.replay_delay`, `recovery.replay_backlog` | вместо A3 |
 
-Объединять A1–A3 в один запрос к `pg_stat_activity` можно, но раздельные запросы проще
-отлаживать; при 10-секундном интервале три обращения к представлению незаметны.
+Запрос A1 — первая и самая простая часть MVP (см. раздел 4.3, этап 1). Коллектор ничего
+не агрегирует и не фильтрует, кроме приведения типов:
+
+```sql
+SELECT
+    clock_timestamp()                               AS collected_at,
+    datid, datname, pid, leader_pid, usesysid, usename, application_name,
+    client_addr, client_hostname, client_port,
+    backend_start, xact_start, query_start, state_change,
+    wait_event_type, wait_event, state,
+    backend_xid::text::bigint                       AS backend_xid,
+    backend_xmin::text::bigint                      AS backend_xmin,
+    age(backend_xmin)                               AS backend_xmin_age,
+    query_id, query, backend_type,
+    extract(epoch FROM clock_timestamp() - backend_start) AS backend_age,
+    extract(epoch FROM clock_timestamp() - xact_start)    AS xact_age,
+    extract(epoch FROM clock_timestamp() - query_start)   AS query_age,
+    extract(epoch FROM clock_timestamp() - state_change)  AS state_age,
+    (wait_event_type = 'Lock')                      AS is_waiting_lock
+FROM pg_stat_activity;
+```
+
+Для PostgreSQL < 14 поле `query_id` подставляется как `NULL`. Текст `query` обрезается до
+`track_activity_query_size` самим PostgreSQL, дополнительной обрезки нет.
 
 #### Tier B — накопительные счётчики экземпляра, каждые 60 с, соединение с базой `postgres`
 
@@ -213,7 +234,7 @@ tick(tier):
 
 | Уровень | `statement_timeout` | Лимит строк | Поведение при ошибке |
 |---|---|---|---|
-| A | 3 с | `sessions` ≤ 500 строк | пропуск запроса, метрика ошибки, повтор на следующем тике |
+| A | 3 с | `pg_stat_activity` ≤ `max_connections` строк, лимита нет | пропуск запроса, метрика ошибки, повтор на следующем тике |
 | B | 15 с | `statements` ≤ `pg_stat_statements.max` | то же |
 | C | 30 с на базу | таблиц ≤ 10 000 на базу | база помечается «медленной», интервал удваивается |
 | D | 60 с | | то же |
@@ -290,15 +311,54 @@ CREATE TABLE statements_dict (
 ) ENGINE = ReplacingMergeTree(last_seen)
 ORDER BY (target, dbid, userid, queryid);
 
--- долгие сеансы (tier A3), сырые строки выше порога
-CREATE TABLE sessions (
+-- полный снимок pg_stat_activity (tier A1): колонки повторяют представление PostgreSQL 16,
+-- плюс вычисленные на стороне PostgreSQL возрасты в секундах
+CREATE TABLE pg_stat_activity (
+    ts               DateTime,                      -- начало тика
+    collected_at     DateTime64(3),                 -- clock_timestamp() на стороне PostgreSQL
+    target           LowCardinality(String),
+    datid            Nullable(UInt32),
+    datname          LowCardinality(Nullable(String)),
+    pid              UInt32,
+    leader_pid       Nullable(UInt32),
+    usesysid         Nullable(UInt32),
+    usename          LowCardinality(Nullable(String)),
+    application_name LowCardinality(String),
+    client_addr      Nullable(String),
+    client_hostname  Nullable(String),
+    client_port      Nullable(Int32),
+    backend_start    DateTime64(6),
+    xact_start       Nullable(DateTime64(6)),
+    query_start      Nullable(DateTime64(6)),
+    state_change     Nullable(DateTime64(6)),
+    wait_event_type  LowCardinality(Nullable(String)),
+    wait_event       LowCardinality(Nullable(String)),
+    state            LowCardinality(Nullable(String)),
+    backend_xid      Nullable(Int64),
+    backend_xmin     Nullable(Int64),
+    backend_xmin_age Nullable(UInt32),
+    query_id         Nullable(Int64),
+    query            String,
+    backend_type     LowCardinality(String),
+    backend_age      Float64,
+    xact_age         Nullable(Float64),
+    query_age        Nullable(Float64),
+    state_age        Nullable(Float64),
+    is_waiting_lock  UInt8
+) ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(ts)
+ORDER BY (target, ts, pid)
+TTL ts + INTERVAL 7 DAY;
+
+-- ожидаемые блокировки (tier A2), одна строка на пару «процесс – объект»
+CREATE TABLE pg_locks_waiting (
     ts DateTime, target LowCardinality(String),
-    pid UInt32, datname LowCardinality(String), usename LowCardinality(String),
-    application_name LowCardinality(String), client_addr String,
-    backend_type LowCardinality(String), state LowCardinality(String),
-    wait_event_type LowCardinality(String), wait_event LowCardinality(String),
-    xact_age Float64, query_age Float64, state_age Float64,
-    query_id Int64, query String
+    pid UInt32, locktype LowCardinality(String), mode LowCardinality(String),
+    database Nullable(UInt32), relation Nullable(UInt32),
+    page Nullable(Int32), tuple Nullable(Int16),
+    virtualxid Nullable(String), transactionid Nullable(Int64),
+    virtualtransaction String,
+    waitstart Nullable(DateTime64(6)), wait_age Nullable(Float64)
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)
 ORDER BY (target, ts, pid)
@@ -406,10 +466,76 @@ ORDER BY (target, tier, query, ts) TTL ts + INTERVAL 7 DAY;
 
 ### 3.3. Materialized views для дашбордов
 
-MV считают агрегаты по дельтам, которые уже вычислил коллектор. Это позволяет использовать
-`SummingMergeTree`, самый дешёвый вариант.
+Для снимков MV считают агрегаты прямо по сырым строкам; для накопительных источников —
+по дельтам, которые уже вычислил коллектор. В обоих случаях хватает `SummingMergeTree` /
+`AggregatingMergeTree`.
 
 ```sql
+-- состояния и ожидания сеансов (глава 2): замена запросов 1.5, 1.6, 1.7, 1.8 книги.
+-- Каждый тик даёт по одной строке на (state, wait_event_type, wait_event);
+-- count — число сеансов в снимке, max_* — худший сеанс в этом состоянии.
+CREATE TABLE activity_by_state (
+    ts DateTime, target LowCardinality(String),
+    backend_type LowCardinality(String),
+    state LowCardinality(String),                -- с псевдосостоянием 'waiting'
+    wait_event_type LowCardinality(String), wait_event LowCardinality(String),
+    sessions UInt32,
+    max_xact_age SimpleAggregateFunction(max, Float64),
+    max_query_age SimpleAggregateFunction(max, Float64),
+    max_state_age SimpleAggregateFunction(max, Float64)
+) ENGINE = SummingMergeTree((sessions))
+PARTITION BY toYYYYMM(ts)
+ORDER BY (target, ts, backend_type, state, wait_event_type, wait_event)
+TTL ts + INTERVAL 90 DAY;
+
+CREATE MATERIALIZED VIEW activity_by_state_mv TO activity_by_state AS
+SELECT
+    ts, target, backend_type,
+    if(is_waiting_lock = 1, 'waiting', ifNull(state, '')) AS state,
+    ifNull(wait_event_type, '') AS wait_event_type,
+    ifNull(wait_event, '')      AS wait_event,
+    count()                     AS sessions,
+    max(ifNull(xact_age, 0))    AS max_xact_age,
+    max(ifNull(query_age, 0))   AS max_query_age,
+    max(ifNull(state_age, 0))   AS max_state_age
+FROM pg_stat_activity
+GROUP BY ts, target, backend_type, state, wait_event_type, wait_event;
+
+-- подключения по адресу/пользователю/базе (запрос 1.2 книги)
+CREATE TABLE activity_by_client (
+    ts DateTime, target LowCardinality(String),
+    client_addr String, usename LowCardinality(String),
+    datname LowCardinality(String), application_name LowCardinality(String),
+    sessions UInt32
+) ENGINE = SummingMergeTree((sessions))
+PARTITION BY toYYYYMM(ts)
+ORDER BY (target, ts, client_addr, usename, datname, application_name)
+TTL ts + INTERVAL 90 DAY;
+
+CREATE MATERIALIZED VIEW activity_by_client_mv TO activity_by_client AS
+SELECT ts, target, ifNull(client_addr, '') AS client_addr, ifNull(usename, '') AS usename,
+       ifNull(datname, '') AS datname, application_name, count() AS sessions
+FROM pg_stat_activity
+WHERE backend_type = 'client backend'
+GROUP BY ts, target, client_addr, usename, datname, application_name;
+
+-- сводка ожиданий блокировок (запрос 1.11 книги)
+CREATE TABLE locks_summary (
+    ts DateTime, target LowCardinality(String),
+    waiting_pids UInt32,
+    max_wait SimpleAggregateFunction(max, Float64),
+    sum_wait SimpleAggregateFunction(sum, Float64)
+) ENGINE = AggregatingMergeTree
+PARTITION BY toYYYYMM(ts)
+ORDER BY (target, ts)
+TTL ts + INTERVAL 90 DAY;
+
+CREATE MATERIALIZED VIEW locks_summary_mv TO locks_summary AS
+SELECT ts, target, uniqExact(pid) AS waiting_pids,
+       max(ifNull(wait_age, 0)) AS max_wait, sum(ifNull(wait_age, 0)) AS sum_wait
+FROM pg_locks_waiting
+GROUP BY ts, target;
+
 -- поминутная свёртка pg_stat_statements: основа всех top-K графиков из главы 3
 CREATE TABLE statements_1m (
     minute DateTime, target LowCardinality(String),
@@ -481,9 +607,10 @@ FROM metrics GROUP BY minute, target, name, labels;
 
 | Дашборд | Панели | Источник |
 |---|---|---|
-| Overview | подключения vs `max_connections`, TPS (commit/rollback), сеансы по состояниям, ожидания по типам, max длительность транзакций/запросов/ожиданий, ошибки (rollback, deadlocks, conflicts, checksum, sessions_*) | `metrics_1m`, `database_stats` |
+| Activity | подключения vs `max_connections`, по адресу/пользователю/базе, сеансы по состояниям (с `waiting`), ожидания по типам и событиям, max длительность транзакций/запросов/состояний, ожидания блокировок (число, max, sum), активные очистки | `activity_by_state`, `activity_by_client`, `locks_summary`, `pg_stat_activity`, `settings` |
+| Overview | TPS (commit/rollback), hit ratio, ошибки (rollback, deadlocks, conflicts, checksum, sessions_*) | `metrics_1m`, `database_stats` |
 | Queries | top-K по calls, rows, exec_time, io_time, cpu_time, wal_bytes, temp; таблица запросов с долями; детали одного `queryid` | `statements_1m`, `statements_dict` |
-| Sessions | таблица долгих сеансов за период, фильтр по пользователю/приложению/состоянию | `sessions` |
+| Sessions | таблица строк `pg_stat_activity` на выбранный момент или за период с фильтрами по состоянию, пользователю, приложению, возрасту; переход к `queryid` в Queries | `pg_stat_activity`, `pg_locks_waiting` |
 | Tables & indexes | top-K seq_tup_read, обновлений/вставок/удалений, HOT %, самые большие и быстрорастущие объекты, неиспользуемые индексы | `table_stats_1h`, `index_stats` |
 | Vacuum & XID | таблицы с `n_dead_tup` выше порога, время с последней автоочистки, частота очисток, запас XID, горизонт видимости, активные очистки | `table_stats`, `metrics`, `vacuum_progress` |
 | I/O, cache, WAL | hit ratio, blk_read/write_time, checkpoints timed/req, checkpoint write/sync time, buffers by writer, wal_bytes/records/fpi, wal_buffers_full, archiver age/failed/queue, буферный кеш по состояниям | `metrics_1m`, `database_stats` |
@@ -538,14 +665,17 @@ config.yaml ──► Targets ──► Scheduler (tier timers) ──► QueryR
 | Этап | Содержание | Результат |
 |---|---|---|
 | 0. Окружение | docker-compose с PostgreSQL 16 (`pg_stat_statements`, `pg_buffercache`, `track_io_timing`), pgbench-нагрузкой, репликой, ClickHouse, Grafana; скрипт создания роли `dbperf` с `pg_monitor` | `make up` поднимает стенд с нагрузкой |
-| 1. Ядро коллектора | конфигурация целей, разведка (2.1), планировщик tiers, формат файлов запросов, QueryRunner с таймаутами, таблицы `metrics`, `settings`, `collector_runs`, writer в ClickHouse | tier A и B3–B6, B9 пишут скаляры; Overview-дашборд (без запросов) |
-| 2. Дельты и pg_stat_statements | DeltaEngine с обработкой сбросов, таблицы `statements`, `statements_dict`, `database_stats`, MV `statements_1m`, `metrics_1m` | дашборд Queries с top-K и долями, TPS и ошибки в Overview |
-| 3. Снимки сеансов и репликация | A3 `sessions`, A4 блокировки, A6–A9 репликация и слоты, A8 прогресс очистки | дашборды Sessions и Replication |
+| 1. `pg_stat_activity` как есть | минимальный коллектор: одна цель, одно соединение, тик 10 с, запрос A1, вставка строк в таблицу `pg_stat_activity`; MV `activity_by_state`, `activity_by_client`; таблицы `settings`, `collector_runs`; дашборд Activity | первый сквозной путь PostgreSQL → ClickHouse → Grafana на самом простом источнике; на нём отлаживаются конфигурация, планировщик, writer и формат файлов запросов |
+| 2. Остальные снимки | A2 `pg_locks_waiting` + MV `locks_summary`, A3–A4 репликация и слоты, A5 прогресс очистки, A6 реплика; разведка цели (2.1) | дашборды Sessions и Replication |
+| 3. Дельты и счётчики экземпляра | DeltaEngine с обработкой сбросов, таблицы `metrics`, `statements`, `statements_dict`, `database_stats`, MV `statements_1m`, `metrics_1m`, tier B целиком | дашборды Queries и Overview, панели I/O и WAL |
 | 4. Объекты баз | обход баз, tier C (`table_stats`, `index_stats`, `function_stats`), MV `table_stats_1h`, tier D1/D2/D5 | дашборды Tables & indexes, Vacuum & XID, I/O-панели буферного кеша и архивирования |
 | 5. Стабилизация | нагрузочная проверка коллектора на базе с 10k таблиц и `pg_stat_statements.max = 10000`, измерение нагрузки на PostgreSQL (сам коллектор виден в `pg_stat_statements` по `application_name`), TTL и размер ClickHouse, документация по установке и конфигурации | релиз MVP |
 
 ### 4.4. Критерии приёмки MVP
 
+- Этап 1: на стенде с pgbench дашборд Activity показывает графики рис. 2.1–2.10 книги
+  (подключения, состояния, ожидания, длительности) с шагом 10 с, а любой момент времени
+  можно «развернуть» в полный список строк `pg_stat_activity`.
 - На стенде с pgbench все графики из глав 2–8 книги, перечисленные в разделе 3.4,
   воспроизводятся с интервалом данных не хуже 1 минуты (снимки — 10 с).
 - Суммарная доля времени запросов коллектора в `pg_stat_statements` цели < 1 %
@@ -563,6 +693,7 @@ config.yaml ──► Targets ──► Scheduler (tier timers) ──► QueryR
 |---|---|
 | Рост `statements` при большом `pg_stat_statements.max` и частом опросе | интервал B ≥ 60 с, TTL 14 дней, фильтр `calls_d > 0` при вставке (неизменившиеся строки не пишем) |
 | Кардинальность `labels` в `metrics` (например, `wait_event`) | фиксированный набор меток на метрику, `LowCardinality` |
+| Объём `pg_stat_activity` при сотнях подключений и тексты запросов с реальными параметрами | TTL 7 дней на сырую таблицу (агрегаты в MV живут 90 дней); при необходимости маскирование `query` в коллекторе или сокращение `track_activity_query_size`; доступ к сырой таблице ограничивается ролью ClickHouse |
 | Разные версии PostgreSQL у целей | варианты SQL по `server_version_num`, набор тестов на 14/15/16 в CI через docker |
 | Коллектор создаёт нагрузку на цель | `statement_timeout`, последовательный обход баз, самонаблюдение, порог отключения запроса при превышении времени |
 | Рассинхронизация часов цели и коллектора | `ts` берётся с коллектора, значения длительностей считаются на стороне PostgreSQL через `clock_timestamp()` |
