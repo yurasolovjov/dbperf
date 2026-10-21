@@ -76,6 +76,7 @@ func (s *Service) TimeSeries(ctx context.Context, req TimeSeriesRequest) (*TimeS
 	}
 	var cells []cell
 	sliceTotal := map[string]uint64{}
+	slicePeak := map[string]uint64{}
 	for rows.Next() {
 		var c cell
 		if err := rows.Scan(&c.bucket, &c.slice, &c.n); err != nil {
@@ -83,6 +84,9 @@ func (s *Service) TimeSeries(ctx context.Context, req TimeSeriesRequest) (*TimeS
 		}
 		cells = append(cells, c)
 		sliceTotal[c.slice] += c.n
+		if c.n > slicePeak[c.slice] {
+			slicePeak[c.slice] = c.n
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("activity rows: %w", err)
@@ -93,7 +97,7 @@ func (s *Service) TimeSeries(ctx context.Context, req TimeSeriesRequest) (*TimeS
 	for i, b := range buckets {
 		index[b] = i
 	}
-	top := topKeys(sliceTotal, limit)
+	top := topKeysSumAndPeak(sliceTotal, slicePeak, limit)
 	topSet := make(map[string]int, len(top))
 	for i, k := range top {
 		topSet[k] = i
@@ -534,6 +538,55 @@ func topKeys(m map[string]uint64, limit int) []string {
 		keys = keys[:limit]
 	}
 	return keys
+}
+
+// topKeysSumAndPeak picks the slices shown as separate series of a time
+// series. Ranking by the sum over the range alone hides a short burst: a query
+// that ran for one bucket at a high rate has a small sum and lands in "other"
+// even though it is the only thing visible in that bucket. So, when the limit
+// allows it (limit >= 10; the proto has no top_by field and the UI asks for
+// 10), the result is the union of the top by sum and the top by per-bucket
+// peak: the top half of the limit by sum first, then the keys with the
+// highest peak that are not yet taken, then the rest by sum until the limit
+// is filled. Below the limit of 10 the ranking is by sum only. The returned
+// order is by sum, so slice ids stay the same as before for the keys that
+// were already in the top by sum.
+func topKeysSumAndPeak(sum, peak map[string]uint64, limit int) []string {
+	if limit < 10 || len(sum) <= limit {
+		return topKeys(sum, limit)
+	}
+	bySum := topKeys(sum, len(sum))
+	byPeak := topKeys(peak, len(peak))
+	chosen := make(map[string]bool, limit)
+	var out []string
+	take := func(k string) {
+		if !chosen[k] && len(out) < limit {
+			chosen[k] = true
+			out = append(out, k)
+		}
+	}
+	for _, k := range bySum[:limit/2] {
+		take(k)
+	}
+	for _, k := range byPeak {
+		if len(out) >= limit {
+			break
+		}
+		take(k)
+	}
+	for _, k := range bySum {
+		if len(out) >= limit {
+			break
+		}
+		take(k)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if sum[out[i]] != sum[out[j]] {
+			return sum[out[i]] > sum[out[j]]
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 func toAny(ss []string) []any {

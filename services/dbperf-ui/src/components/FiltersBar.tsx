@@ -7,11 +7,13 @@ interface Props {
   onClear: () => void
   totalOnly: boolean
   onTotalOnly: (v: boolean) => void
+  background: boolean
+  onBackground: (v: boolean) => void
   expanded: boolean
   onExpand: () => void
 }
 
-export function FiltersBar({ filters, onRemove, onClear, totalOnly, onTotalOnly, expanded, onExpand }: Props) {
+export function FiltersBar({ filters, onRemove, onClear, totalOnly, onTotalOnly, background, onBackground, expanded, onExpand }: Props) {
   return (
     <div className="filters-bar">
       <div className="filters">
@@ -39,6 +41,10 @@ export function FiltersBar({ filters, onRemove, onClear, totalOnly, onTotalOnly,
         )}
       </div>
       <div className="filters-right">
+        <label className="checkbox" title="Показывать не только client backend, но и walsender, autovacuum и другие фоновые процессы">
+          <input type="checkbox" checked={background} onChange={(e) => onBackground(e.target.checked)} />
+          Фоновые процессы
+        </label>
         <label className="checkbox">
           <input type="checkbox" checked={totalOnly} onChange={(e) => onTotalOnly(e.target.checked)} />
           Общая активность

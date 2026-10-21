@@ -16,7 +16,10 @@ func TestApplyCPURule(t *testing.T) {
 	}{
 		{"active", nil, nil, "CPU", "CPU"},
 		{"active", ptr("Lock"), ptr("transactionid"), "Lock", "transactionid"},
-		{"fastpath function call", nil, nil, "", ""},
+		{"fastpath function call", nil, nil, "CPU", "CPU"},
+		{"fastpath function call", ptr("IO"), ptr("DataFileRead"), "IO", "DataFileRead"},
+		{"idle", nil, nil, "", ""},
+		{"idle in transaction", nil, nil, "", ""},
 		{"active", nil, ptr("x"), "", "x"},
 	}
 	for _, c := range cases {

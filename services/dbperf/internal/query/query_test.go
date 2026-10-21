@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -79,5 +80,47 @@ func TestTopKeys(t *testing.T) {
 	got := topKeys(m, 3)
 	if strings.Join(got, ",") != "c,a,b" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTopKeysSumAndPeak(t *testing.T) {
+	sum := map[string]uint64{}
+	peak := map[string]uint64{}
+	// s0..s11: steady slices, sum 120-109 spread over the range, peak 1.
+	for i := 0; i < 12; i++ {
+		k := fmt.Sprintf("s%02d", i)
+		sum[k] = uint64(120 - i)
+		peak[k] = 1
+	}
+	// burst: one bucket at 50, small sum.
+	sum["burst"], peak["burst"] = 50, 50
+	got := topKeysSumAndPeak(sum, peak, 10)
+	if len(got) != 10 {
+		t.Fatalf("len %d: %v", len(got), got)
+	}
+	seen := map[string]bool{}
+	for _, k := range got {
+		seen[k] = true
+	}
+	if !seen["burst"] {
+		t.Fatalf("burst missing: %v", got)
+	}
+	for i := 0; i < 5; i++ {
+		if !seen[fmt.Sprintf("s%02d", i)] {
+			t.Fatalf("top by sum s%02d missing: %v", i, got)
+		}
+	}
+	// Order is by sum: the burst (sum 50) comes last.
+	if got[len(got)-1] != "burst" {
+		t.Fatalf("order: %v", got)
+	}
+	// Below the limit of 10 the ranking is by sum only.
+	if got := topKeysSumAndPeak(sum, peak, 5); strings.Join(got, ",") != "s00,s01,s02,s03,s04" {
+		t.Fatalf("limit 5: %v", got)
+	}
+	// Fewer keys than the limit: everything, by sum.
+	small := map[string]uint64{"a": 1, "b": 3}
+	if got := topKeysSumAndPeak(small, map[string]uint64{"a": 9, "b": 1}, 10); strings.Join(got, ",") != "b,a" {
+		t.Fatalf("small: %v", got)
 	}
 }

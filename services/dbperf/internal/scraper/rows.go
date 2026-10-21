@@ -62,10 +62,11 @@ type Emitter interface {
 // and not waiting on anything.
 const CPU = "CPU"
 
-// ApplyCPURule implements the Kintsugi rule: an active backend with neither
-// wait_event_type nor wait_event is on CPU.
+// ApplyCPURule implements the Kintsugi rule: a backend in an active state
+// ('active' or 'fastpath function call', the states the snapshot query
+// collects) with neither wait_event_type nor wait_event is on CPU.
 func ApplyCPURule(state string, waitEventType, waitEvent *string) (string, string) {
-	if waitEventType == nil && waitEvent == nil && state == "active" {
+	if waitEventType == nil && waitEvent == nil && isActiveState(state) {
 		return CPU, CPU
 	}
 	wt, we := "", ""
@@ -76,6 +77,11 @@ func ApplyCPURule(state string, waitEventType, waitEvent *string) (string, strin
 		we = *waitEvent
 	}
 	return wt, we
+}
+
+// isActiveState reports whether a pg_stat_activity state counts as active.
+func isActiveState(state string) bool {
+	return state == "active" || state == "fastpath function call"
 }
 
 // HashQuery computes the query hash for servers without compute_query_id:

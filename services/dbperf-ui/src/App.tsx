@@ -13,6 +13,11 @@ const RAW_RANGE_LIMIT = 2 * 3600 // seconds; longer ranges are served from the 1
 const OVERVIEW_POINTS = 120
 const DEFAULT_WINDOW = 300
 
+// The scraper stores every active backend, walsender and autovacuum workers
+// included; the dashboard shows client backends unless background processes
+// are switched on in the filters bar.
+const CLIENT_BACKEND_FILTER: Filter = { dimension: 'BACKEND_TYPE', values: ['client backend'] }
+
 function periodRange(p: Period, now: number): TimeRange {
   if (p.seconds === 0 && p.start && p.end) return { startUnix: p.start, endUnix: p.end }
   return { startUnix: now - p.seconds, endUnix: now }
@@ -43,6 +48,7 @@ export default function App() {
   const [windowSel, setWindowSel] = useState<TimeRange | null>(null) // null = attached to the end
   const [filters, setFilters] = useState<Filter[]>([])
   const [totalOnly, setTotalOnly] = useState(false)
+  const [background, setBackground] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [unit, setUnit] = useState<Unit>('PERCENT')
   const [queryHash, setQueryHash] = useState<string | null>(null)
@@ -50,6 +56,8 @@ export default function App() {
   const range = useMemo(() => periodRange(period, now), [period, now])
   const win = windowSel ?? defaultWindow(range)
   const rawLevel = range.endUnix - range.startUnix <= RAW_RANGE_LIMIT
+  const baseFilters = useMemo<Filter[]>(() => (background ? [] : [CLIENT_BACKEND_FILTER]), [background])
+  const queryFilters = useMemo<Filter[]>(() => [...baseFilters, ...filters], [baseFilters, filters])
   const overviewStep = Math.max(10, Math.floor((range.endUnix - range.startUnix) / OVERVIEW_POINTS))
 
   // Targets and status
@@ -91,25 +99,25 @@ export default function App() {
   const overview = useApi(
     (s) =>
       targetId
-        ? api.timeSeries({ targetId, range, stepSeconds: overviewStep, slicing: { dimension, limit: 10 }, filters: [], excludeSelf: true, maxPoints: OVERVIEW_POINTS + 2 }, s)
+        ? api.timeSeries({ targetId, range, stepSeconds: overviewStep, slicing: { dimension, limit: 10 }, filters: baseFilters, excludeSelf: true, maxPoints: OVERVIEW_POINTS + 2 }, s)
         : Promise.resolve(null),
-    [targetId, range.startUnix, range.endUnix, overviewStep, dimension],
+    [targetId, range.startUnix, range.endUnix, overviewStep, dimension, baseFilters],
     0,
   )
   const detail = useApi(
     (s) =>
       targetId
-        ? api.timeSeries({ targetId, range: win, stepSeconds: 10, slicing: { dimension, limit: 10 }, filters, excludeSelf: true, maxPoints: 720 }, s)
+        ? api.timeSeries({ targetId, range: win, stepSeconds: 10, slicing: { dimension, limit: 10 }, filters: queryFilters, excludeSelf: true, maxPoints: 720 }, s)
         : Promise.resolve(null),
-    [targetId, win.startUnix, win.endUnix, dimension, filters],
+    [targetId, win.startUnix, win.endUnix, dimension, queryFilters],
     0,
   )
   const top = useApi(
     (s) =>
       targetId
-        ? api.top({ targetId, range: win, slicing: { dimension: tableDim, limit: 25 }, subSlicing: { dimension: 'WAIT_EVENT_TYPE', limit: 10 }, filters, excludeSelf: true }, s)
+        ? api.top({ targetId, range: win, slicing: { dimension: tableDim, limit: 25 }, subSlicing: { dimension: 'WAIT_EVENT_TYPE', limit: 10 }, filters: queryFilters, excludeSelf: true }, s)
         : Promise.resolve(null),
-    [targetId, win.startUnix, win.endUnix, tableDim, filters],
+    [targetId, win.startUnix, win.endUnix, tableDim, queryFilters],
     0,
   )
 
@@ -157,6 +165,8 @@ export default function App() {
           onClear={() => setFilters([])}
           totalOnly={totalOnly}
           onTotalOnly={setTotalOnly}
+          background={background}
+          onBackground={setBackground}
           expanded={expanded}
           onExpand={() => setExpanded((v) => !v)}
         />
