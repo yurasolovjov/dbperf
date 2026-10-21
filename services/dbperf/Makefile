@@ -25,10 +25,10 @@ build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker version --format '{{.Server.Arch}}') go build -trimpath -ldflags="-s -w" -o out/dbperf ./cmd/dbperf
 
 up: build-linux
-	docker compose -f deploy/docker-compose.yaml up --build -d
+	docker compose -f ../../deploy/docker-compose.yaml up --build -d
 
 down:
-	docker compose -f deploy/docker-compose.yaml down -v
+	docker compose -f ../../deploy/docker-compose.yaml down -v
 
 # Synthetic load: 50 000 targets, 10 s interval, 8 active sessions each, 1 hour of data.
 load:

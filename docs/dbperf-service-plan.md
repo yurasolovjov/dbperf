@@ -104,11 +104,15 @@ services/dbperf/
 │   ├── query/                      чтение: SQL к ClickHouse → модели срезов
 │   ├── api/grpc/                   реализация сервисов, маппинг proto ↔ модели
 │   └── telemetry/                  Prometheus-метрики, логирование, health
-├── deploy/
-│   ├── clickhouse/schema.sql       DDL раздела 8
-│   └── docker-compose.yaml         PostgreSQL 16 + pgbench + ClickHouse + dbperf
+├── Dockerfile, Dockerfile.prebuilt
 ├── configs/config.example.yaml
 └── test/load/                      генератор 50 000 целей (раздел 10.5)
+
+deploy/                             в корне репозитория
+├── clickhouse/schema.sql           DDL раздела 8
+├── postgres/init.sql               роль dbperf и база pgbench для стенда
+├── dbperf/config.yaml, targets.yaml конфигурация dbperf на стенде
+└── docker-compose.yaml             PostgreSQL 16 + pgbench + ClickHouse + dbperf
 ```
 
 Зависимости: `github.com/jackc/pgx/v5/pgconn` (без `pgxpool` и без `pgx.Conn`),
@@ -774,7 +778,7 @@ view на вставку добавляют работу, сопоставиму
 
 ### 10.6. Результаты проверки на стенде (21.10.2026)
 
-Стенд `services/dbperf/deploy/docker-compose.yaml`: PostgreSQL 16.14 с pgbench на 20 клиентах,
+Стенд `deploy/docker-compose.yaml`: PostgreSQL 16.14 с pgbench на 20 клиентах,
 ClickHouse 25.8, один экземпляр dbperf в роли `all`. Синтетический прогон генератором
 `test/load`: 5 000 целей, интервал 10 с, в среднем 8 активных сессий, 10 минут данных.
 

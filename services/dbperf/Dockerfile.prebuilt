@@ -1,5 +1,5 @@
 # Image from a binary built on the host: make up / make build-linux.
-# Used by deploy/docker-compose.yaml so the bench does not need network inside the build.
+# Used by ../../deploy/docker-compose.yaml so the bench does not need network inside the build.
 FROM scratch
 COPY out/dbperf /dbperf
 EXPOSE 9090 9091

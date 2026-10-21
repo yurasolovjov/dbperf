@@ -12,7 +12,7 @@
 | 3 | `internal/sink/clickhouse` | Буфер, вставка батчами (5 с / 40 000 строк), ретраи, очередь на 10 батчей |
 | чтение | `internal/query`, `internal/api/grpc` | SQL к ClickHouse с выбором уровня (сырой / минутный), gRPC `TargetService` и `ActivityService` |
 
-Схема ClickHouse: [deploy/clickhouse/schema.sql](deploy/clickhouse/schema.sql).
+Схема ClickHouse: [deploy/clickhouse/schema.sql](../../deploy/clickhouse/schema.sql). Стенд docker-compose лежит в корне репозитория: [deploy/docker-compose.yaml](../../deploy/docker-compose.yaml).
 Контракт gRPC: [api/proto/dbperf/v1](api/proto/dbperf/v1).
 
 ## Запуск стенда
@@ -26,7 +26,7 @@ make up        # PostgreSQL 16 + pgbench, ClickHouse 25.8, dbperf (collector + a
 Проверка данных:
 
 ```bash
-docker compose -f deploy/docker-compose.yaml exec clickhouse clickhouse-client \
+docker compose -f ../../deploy/docker-compose.yaml exec clickhouse clickhouse-client \
   --query "SELECT target_id, count(), max(ts) FROM dbperf.pg_samples GROUP BY target_id"
 ```
 

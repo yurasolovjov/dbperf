@@ -1,5 +1,6 @@
 # Test bench: PostgreSQL 16 with pgbench load, ClickHouse 24, dbperf (collector + API).
-# Usage: make up (builds the linux binary first, then docker compose up --build)
+# Usage: make -C services/dbperf up (builds the linux binary first, then docker compose up --build)
+# Lives in the repo root; the dbperf image is built from services/dbperf.
 services:
   postgres:
     image: postgres:16
@@ -52,7 +53,7 @@ services:
 
   dbperf:
     build:
-      context: ..
+      context: ../services/dbperf
       dockerfile: Dockerfile.prebuilt
     depends_on:
       postgres: { condition: service_healthy }
