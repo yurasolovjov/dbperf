@@ -1,0 +1,44 @@
+# dbperf configuration. Every field has a default; see internal/config/config.go.
+instance: dbperf-1
+role: all            # collector | api | all
+
+registry:
+  type: yaml         # yaml | postgres
+  yaml_path: configs/targets.yaml
+  # postgres_dsn: postgres://dbperf:dbperf@meta:5432/dbperf_meta
+  max_targets: 5000
+  lease_ttl: 60s
+  lease_renew: 20s
+  refresh: 30s
+
+scraper:
+  default_interval: 10s
+  statement_timeout: 5s
+  connect_timeout: 5s
+  query_max_len: 4096
+  query_cache_size: 10000
+  reconnect_min: 1s
+  reconnect_max: 60s
+
+clickhouse:
+  addrs: ["localhost:9000"]
+  database: dbperf
+  user: default
+  password: ""
+  flush_interval: 5s
+  flush_rows: 40000
+  max_pending_batches: 10
+  dial_timeout: 5s
+  max_open_conns: 8
+  raw_range_limit: 2h
+  raw_step: 10s
+
+api:
+  grpc_addr: ":9090"
+  http_addr: ":9091"
+  max_concurrent_queries: 32
+  max_points: 2000
+
+log:
+  level: info
+  format: json

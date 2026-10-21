@@ -1,0 +1,11 @@
+# Monitored databases for registry.type = yaml. The file is re-read on every refresh.
+targets:
+  - id: 1
+    name: pg1
+    dsn: postgres://dbperf:dbperf@localhost:5432/postgres?sslmode=disable
+    interval: 10s
+  - id: 2
+    name: pg1-pgbench
+    dsn: postgres://dbperf:dbperf@localhost:5432/pgbench?sslmode=disable
+    interval: 5s
+    enabled: true

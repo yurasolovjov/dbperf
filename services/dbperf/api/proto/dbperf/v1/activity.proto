@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+package dbperf.v1;
+
+option go_package = "github.com/yurasolovjov/dbperf/services/dbperf/gen/dbperf/v1;dbperfv1";
+
+// ActivityService serves the "session activity" dashboard: average active
+// sessions (AAS) sliced by a dimension over time, top-N tables and raw samples.
+service ActivityService {
+  // Time series of activity per bucket with a top-N slice (overview and detail graphs).
+  rpc GetActivityTimeSeries(ActivityTimeSeriesRequest) returns (ActivityTimeSeriesResponse);
+  // Scalar top-N for a window with an optional nested slice (top activities table).
+  rpc GetActivityTop(ActivityTopRequest) returns (ActivityTopResponse);
+  // Totals without slicing ("total activity").
+  rpc GetActivityTotals(ActivityTotalsRequest) returns (ActivityTotalsResponse);
+  // Raw rows of the sample closest to a point in time.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // Full query text by hash.
+  rpc GetQueryText(GetQueryTextRequest) returns (GetQueryTextResponse);
+}
+
+enum Dimension {
+  DIMENSION_UNSPECIFIED = 0;
+  WAIT_EVENT_TYPE = 1;  // wait types
+  WAIT_EVENT = 2;       // wait events
+  QUERY = 3;            // SQL (query_hash)
+  CLIENT_ADDR = 4;      // hosts
+  USENAME = 5;          // users
+  DATNAME = 6;          // databases
+  PID = 7;              // processes (raw level only)
+  APPLICATION_NAME = 8; // applications
+  BACKEND_TYPE = 9;
+}
+
+enum Unit {
+  UNIT_UNSPECIFIED = 0;
+  AAS = 1;     // average active sessions
+  PERCENT = 2; // share of total activity, sums to 100
+}
+
+message TimeRange {
+  int64 start_unix = 1; // inclusive
+  int64 end_unix = 2;   // exclusive
+}
+
+message Filter {
+  Dimension dimension = 1;
+  repeated string values = 2; // OR inside a filter, AND between filters
+  bool exclude = 3;           // NOT IN
+}
+
+message TopSlicing {
+  Dimension dimension = 1;
+  int32 limit = 2; // <= 100, the rest goes to the remainder
+}
+
+message SliceValue {
+  string value = 1;      // slice value: 'Lock', '10.252.49.126', hash as string
+  string short_text = 2; // for QUERY: first 64 characters of the text
+  bool is_remainder = 3; // true for the "other" row
+  uint32 id = 4;         // stable id of the value inside the response (for colors)
+}
+
+message ActivityTimeSeriesRequest {
+  uint32 target_id = 1;
+  TimeRange range = 2;
+  int32 step_seconds = 3;      // requested step, the server aligns it
+  TopSlicing slicing = 4;      // required
+  repeated Filter filters = 5;
+  bool exclude_self = 6;       // drop application_name = 'dbperf'
+  int32 max_points = 7;        // <= 2000, default 720
+}
+
+message Series {
+  SliceValue slice = 1;
+  repeated double values = 2; // by timestamps, AAS
+  double average = 3;
+}
+
+message ActivityTimeSeriesResponse {
+  TimeRange range = 1;        // actual range after alignment
+  int32 step_seconds = 2;     // agreed step
+  string level = 3;           // "raw" | "1m"
+  repeated int64 timestamps = 4;
+  repeated double totals = 5; // total activity per bucket
+  repeated Series series = 6; // top-N + remainder
+}
+
+message ActivityTopRequest {
+  uint32 target_id = 1;
+  TimeRange range = 2;
+  TopSlicing slicing = 3;     // outer slice, e.g. QUERY limit 25
+  TopSlicing sub_slicing = 4; // nested slice, e.g. WAIT_EVENT_TYPE limit 10; optional
+  repeated Filter filters = 5;
+  bool exclude_self = 6;
+}
+
+message TopEntry {
+  SliceValue slice = 1;
+  double aas = 2;
+  double percent = 3;
+  repeated TopEntry sub = 4; // nested slice, empty without sub_slicing
+}
+
+message ActivityTopResponse {
+  double total_aas = 1;
+  int64 n_samples = 2;
+  repeated TopEntry entries = 3; // top-N + remainder
+}
+
+message ActivityTotalsRequest {
+  uint32 target_id = 1;
+  TimeRange range = 2;
+  int32 step_seconds = 3;
+  repeated Filter filters = 4;
+  bool exclude_self = 5;
+}
+
+message ActivityTotalsResponse {
+  int32 step_seconds = 1;
+  repeated int64 timestamps = 2;
+  repeated double values = 3;
+  double average = 4;
+}
+
+message ListSessionsRequest {
+  uint32 target_id = 1;
+  int64 at_unix = 2; // closest sample not later than at_unix
+  repeated Filter filters = 3;
+  int32 limit = 4; // <= 1000
+}
+
+message Session {
+  int64 ts = 1;
+  int32 pid = 2;
+  int32 leader_pid = 3;
+  string backend_type = 4;
+  string datname = 5;
+  string usename = 6;
+  string application_name = 7;
+  string client_addr = 8;
+  string state = 9;
+  string wait_event_type = 10;
+  string wait_event = 11;
+  int64 backend_start = 12;
+  int64 xact_start = 13;
+  int64 query_start = 14;
+  int64 state_change = 15;
+  uint64 query_hash = 16;
+  string query_short = 17; // 64 characters
+}
+
+message ListSessionsResponse {
+  int64 sample_ts = 1;
+  repeated Session sessions = 2;
+}
+
+message GetQueryTextRequest {
+  uint32 target_id = 1;
+  uint64 query_hash = 2;
+}
+
+message GetQueryTextResponse {
+  string query = 1;
+  int64 last_seen = 2;
+  bool truncated = 3;
+}

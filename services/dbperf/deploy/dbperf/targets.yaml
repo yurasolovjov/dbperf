@@ -1,0 +1,9 @@
+targets:
+  - id: 1
+    name: postgres
+    dsn: postgres://dbperf:dbperf@postgres:5432/postgres?sslmode=disable
+    interval: 10s
+  - id: 2
+    name: pgbench
+    dsn: postgres://dbperf:dbperf@postgres:5432/pgbench?sslmode=disable
+    interval: 5s

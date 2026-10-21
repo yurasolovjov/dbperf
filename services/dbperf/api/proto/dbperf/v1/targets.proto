@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package dbperf.v1;
+
+option go_package = "github.com/yurasolovjov/dbperf/services/dbperf/gen/dbperf/v1;dbperfv1";
+
+// TargetService returns the list of monitored PostgreSQL databases and the
+// scraper status of each one.
+service TargetService {
+  rpc ListTargets(ListTargetsRequest) returns (ListTargetsResponse);
+  rpc GetTargetStatus(GetTargetStatusRequest) returns (TargetStatus);
+}
+
+message ListTargetsRequest {
+  string name_filter = 1; // substring of the name, empty = all
+  int32 page_size = 2;    // <= 1000
+  string page_token = 3;
+}
+
+message Target {
+  uint32 target_id = 1;
+  string name = 2;
+  int32 interval_sec = 3;
+  bool enabled = 4;
+}
+
+message ListTargetsResponse {
+  repeated Target targets = 1;
+  string next_page_token = 2;
+}
+
+message GetTargetStatusRequest {
+  uint32 target_id = 1;
+}
+
+message TargetStatus {
+  uint32 target_id = 1;
+  string owner_instance = 2;
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    CONNECTED = 1;
+    DISCONNECTED = 2;
+    DISABLED = 3;
+  }
+  State state = 3;
+  int64 disconnected_since = 4; // unix, 0 when connected
+  int64 last_sample_at = 5;     // unix
+  string last_error = 6;
+  int32 server_version_num = 7; // e.g. 160003
+  int32 last_sample_duration_ms = 8;
+}

@@ -1,0 +1,17 @@
+instance: dbperf-1
+role: all
+registry:
+  type: yaml
+  yaml_path: /etc/dbperf/targets.yaml
+clickhouse:
+  addrs: ["clickhouse:9000"]
+  database: dbperf
+  user: default
+  flush_interval: 5s
+  flush_rows: 40000
+api:
+  grpc_addr: ":9090"
+  http_addr: ":9091"
+log:
+  level: info
+  format: text

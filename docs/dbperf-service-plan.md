@@ -41,7 +41,7 @@
 | Ключ разреза SQL | Kintsugi: точный текст; описание дашборда: `query_id` | **`query_id` при PostgreSQL ≥ 14, иначе `cityHash64(query)`** в колонке `query_hash`; текст — в отдельной таблице по хэшу |
 | Собственные сеансы | Kintsugi исключает только свой pid | Исключается свой pid в запросе и `application_name = 'dbperf'` при чтении |
 | Интервал снимка | Kintsugi 1–3 с, MVP 10 с | **10 с по умолчанию**, настраивается на цель (5 с для важных) |
-| Два уровня хранения | Kintsugi: секундный (не более 2 ч) и минутный | Сырые снимки 7 дней, минутный агрегат 30 дней; выбор уровня по диапазону запроса |
+| Два уровня хранения | Kintsugi: секундный (не более 2 ч) и минутный | Сырые снимки 7 дней, минутный агрегат 14 дней; выбор уровня по диапазону запроса |
 | Дельты счётчиков | План MVP, раздел 1.3 | Не нужны: активность — снимок, не счётчик |
 
 ---
@@ -59,10 +59,10 @@
  PostgreSQL × 5000 ◀┼──────────┤  тик 10 с: SELECT … FROM pg_stat_activity          │
  (одно соединение   │           │  → []ActivityRow + SampleMarker                   │
   на базу)          │           ▼  chan Batch                                       │
-                    │ Слой 3  sink         буфер, flush по 3 с / 20 000 строк       │
+                    │ Слой 3  sink         буфер, flush по 5 с / 40 000 строк       │
  ClickHouse ◀───────┼──────────┤  clickhouse-go native batch INSERT                 │
- (Distributed →     │           │                                                  │
-  ReplicatedMT)     │ Чтение  query + api  gRPC ActivityService, TargetService      │
+ (один узел,        │           │                                                  │
+  MergeTree)        │ Чтение  query + api  gRPC ActivityService, TargetService      │
  UI / Grafana ◀─────┼──────────┘                                                   │
                     └──────────────────────────────────────────────────────────────┘
 ```
@@ -106,8 +106,7 @@ services/dbperf/
 │   └── telemetry/                  Prometheus-метрики, логирование, health
 ├── deploy/
 │   ├── clickhouse/schema.sql       DDL раздела 8
-│   ├── docker-compose.yaml         PostgreSQL 16 + pgbench + ClickHouse + dbperf
-│   └── k8s/                        манифесты, 10 реплик коллектора
+│   └── docker-compose.yaml         PostgreSQL 16 + pgbench + ClickHouse + dbperf
 ├── configs/config.example.yaml
 └── test/load/                      генератор 50 000 целей (раздел 10.5)
 ```
@@ -254,14 +253,14 @@ type ActivityRow struct {
 
 Один `Sink` на экземпляр, три буфера: `pg_activity`, `pg_samples`, `pg_query_texts`.
 
-- **Порог сброса**: 3 с или 20 000 строк, что раньше. При 5 000 целей и 8 активных сессиях
-  на базу экземпляр даёт 4 000 строк/с, батч — 12 000 строк. Это внутри рекомендации
+- **Порог сброса**: 5 с или 40 000 строк, что раньше. При 5 000 целей и 8 активных сессиях
+  на базу экземпляр даёт 4 000 строк/с, батч — 20 000 строк. Это внутри рекомендации
   документации ClickHouse (10–100 тысяч строк на вставку, около одной вставки в секунду на
-  таблицу на кластер; при 10 экземплярах — 3–4 вставки в секунду, что допустимо; при росте
-  числа экземпляров включается `async_insert = 1, wait_for_async_insert = 1`).
+  таблицу; при 10 экземплярах на один узел приходится 2 вставки в секунду в `pg_activity`
+  и столько же в `pg_samples`, что допустимо; при росте числа экземпляров включается
+  `async_insert = 1, wait_for_async_insert = 1`).
 - **Протокол**: `clickhouse-go/v2`, native, `PrepareBatch` + `Append` по колонкам,
-  `Send`. Вставка в `Distributed`-таблицу или напрямую в шард по `target_id % shards`
-  (второе дешевле, выбирается на этапе нагрузочного теста).
+  `Send`, напрямую в таблицы одного узла.
 - **Ошибки**: ретрай с экспоненциальной задержкой до 30 с, буфер не более 10 батчей
   (около 30 с данных), затем отбрасываются самые старые с метрикой `dbperf_sink_dropped_rows`.
 - **Тексты запросов**: LRU на цель (10 000 хэшей); новый хэш → строка в `pg_query_texts`.
@@ -275,11 +274,14 @@ type ActivityRow struct {
 
 - Все запросы дашборда фильтруют по одной цели и диапазону времени, поэтому ключ сортировки
   начинается с `target_id`: чтение одной цели за час — тысячи строк из миллиардов.
-- Сырые строки хранятся 7 дней, минутный агрегат 30 дней; за пределами 2 часов запросы идут
+- Сырые строки хранятся 7 дней, минутный агрегат 14 дней; за пределами 2 часов запросы идут
   в агрегат (как у Kintsugi).
-- Кластер: `ReplicatedMergeTree` на каждом шарде, `Distributed` поверх, шардирование по
-  `target_id`, чтобы все данные цели лежали на одном шарде и запросы цели не собирали
-  результат с нескольких узлов.
+- **MVP — один узел ClickHouse без шардов и реплик**: обычные `MergeTree`,
+  `SummingMergeTree`, `ReplacingMergeTree`. Расчёт раздела 10 показывает, что один узел
+  16 ядер / 64 ГБ / 4 ТБ NVMe держит 50 000 баз в среднем сценарии. Переход на кластер
+  потом не меняет схему: таблицы переименовываются в `*_local`, движки получают префикс
+  `Replicated`, сверху создаются `Distributed` с ключом `target_id`, ключи сортировки и
+  materialized views остаются теми же.
 - Партиции по дню, `TTL` с `ttl_only_drop_parts = 1`: удаление по дням целыми кусками.
 - Словарные строки — `LowCardinality(String)`: состояний, типов и событий ожидания — десятки,
   имён баз, ролей и приложений — тысячи. Адрес клиента — тип `IPv6` (16 байт, IPv4 как
@@ -290,10 +292,10 @@ type ActivityRow struct {
 ### 8.2. DDL
 
 ```sql
-CREATE DATABASE IF NOT EXISTS dbperf ON CLUSTER '{cluster}';
+CREATE DATABASE IF NOT EXISTS dbperf;
 
 -- 1. Активные сессии: одна строка на активный процесс в снимке
-CREATE TABLE dbperf.pg_activity_local ON CLUSTER '{cluster}' (
+CREATE TABLE dbperf.pg_activity (
     target_id        UInt32                 CODEC(Delta(4), ZSTD(1)),
     ts               DateTime               CODEC(Delta(4), ZSTD(1)),
     pid              Int32                  CODEC(T64, ZSTD(1)),
@@ -311,45 +313,36 @@ CREATE TABLE dbperf.pg_activity_local ON CLUSTER '{cluster}' (
     query_start      DateTime               CODEC(Delta(4), ZSTD(1)),
     state_change     DateTime               CODEC(Delta(4), ZSTD(1)),
     query_hash       UInt64                 CODEC(ZSTD(1))
-) ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/pg_activity', '{replica}')
+) ENGINE = MergeTree
 PARTITION BY toDate(ts)
 ORDER BY (target_id, ts, pid)
 TTL ts + INTERVAL 7 DAY
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
-CREATE TABLE dbperf.pg_activity ON CLUSTER '{cluster}' AS dbperf.pg_activity_local
-ENGINE = Distributed('{cluster}', dbperf, pg_activity_local, target_id);
-
 -- 2. Снимки: одна строка на тик цели, даже если активных сессий нет (знаменатель СКАС)
-CREATE TABLE dbperf.pg_samples_local ON CLUSTER '{cluster}' (
+CREATE TABLE dbperf.pg_samples (
     target_id   UInt32   CODEC(Delta(4), ZSTD(1)),
     ts          DateTime CODEC(Delta(4), ZSTD(1)),
     n_active    UInt16   CODEC(T64, ZSTD(1)),
     duration_ms UInt16   CODEC(T64, ZSTD(1))
-) ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/pg_samples', '{replica}')
+) ENGINE = MergeTree
 PARTITION BY toDate(ts)
 ORDER BY (target_id, ts)
 TTL ts + INTERVAL 7 DAY
 SETTINGS ttl_only_drop_parts = 1;
 
-CREATE TABLE dbperf.pg_samples ON CLUSTER '{cluster}' AS dbperf.pg_samples_local
-ENGINE = Distributed('{cluster}', dbperf, pg_samples_local, target_id);
-
 -- 3. Тексты запросов: одна строка на (цель, хэш)
-CREATE TABLE dbperf.pg_query_texts_local ON CLUSTER '{cluster}' (
+CREATE TABLE dbperf.pg_query_texts (
     target_id  UInt32,
     query_hash UInt64,
     query      String   CODEC(ZSTD(3)),
     last_seen  DateTime
-) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/{cluster}/tables/{shard}/pg_query_texts', '{replica}', last_seen)
+) ENGINE = ReplacingMergeTree(last_seen)
 ORDER BY (target_id, query_hash)
 TTL last_seen + INTERVAL 30 DAY;
 
-CREATE TABLE dbperf.pg_query_texts ON CLUSTER '{cluster}' AS dbperf.pg_query_texts_local
-ENGINE = Distributed('{cluster}', dbperf, pg_query_texts_local, target_id);
-
 -- 4. Минутный агрегат активности: без pid и точного времени
-CREATE TABLE dbperf.pg_activity_1m_local ON CLUSTER '{cluster}' (
+CREATE TABLE dbperf.pg_activity_1m (
     target_id        UInt32,
     minute           DateTime,
     backend_type     LowCardinality(String),
@@ -361,46 +354,38 @@ CREATE TABLE dbperf.pg_activity_1m_local ON CLUSTER '{cluster}' (
     wait_event       LowCardinality(String),
     query_hash       UInt64,
     n_elements       UInt32
-) ENGINE = ReplicatedSummingMergeTree('/clickhouse/{cluster}/tables/{shard}/pg_activity_1m', '{replica}', (n_elements))
+) ENGINE = SummingMergeTree((n_elements))
 PARTITION BY toYYYYMMDD(minute)
 ORDER BY (target_id, minute, backend_type, datname, usename, application_name,
           client_addr, wait_event_type, wait_event, query_hash)
-TTL minute + INTERVAL 30 DAY
+TTL minute + INTERVAL 14 DAY
 SETTINGS ttl_only_drop_parts = 1;
 
-CREATE MATERIALIZED VIEW dbperf.pg_activity_1m_mv ON CLUSTER '{cluster}'
-TO dbperf.pg_activity_1m_local AS
+CREATE MATERIALIZED VIEW dbperf.pg_activity_1m_mv TO dbperf.pg_activity_1m AS
 SELECT target_id, toStartOfMinute(ts) AS minute,
        backend_type, datname, usename, application_name, client_addr,
        wait_event_type, wait_event, query_hash,
        count() AS n_elements
-FROM dbperf.pg_activity_local
+FROM dbperf.pg_activity
 GROUP BY target_id, minute, backend_type, datname, usename, application_name,
          client_addr, wait_event_type, wait_event, query_hash;
 
-CREATE TABLE dbperf.pg_activity_1m ON CLUSTER '{cluster}' AS dbperf.pg_activity_1m_local
-ENGINE = Distributed('{cluster}', dbperf, pg_activity_1m_local, target_id);
-
 -- 5. Минутный счётчик снимков: знаменатель для агрегата
-CREATE TABLE dbperf.pg_samples_1m_local ON CLUSTER '{cluster}' (
+CREATE TABLE dbperf.pg_samples_1m (
     target_id UInt32,
     minute    DateTime,
     n_samples UInt32,
     n_active  UInt32
-) ENGINE = ReplicatedSummingMergeTree('/clickhouse/{cluster}/tables/{shard}/pg_samples_1m', '{replica}', (n_samples, n_active))
+) ENGINE = SummingMergeTree((n_samples, n_active))
 PARTITION BY toYYYYMMDD(minute)
 ORDER BY (target_id, minute)
-TTL minute + INTERVAL 30 DAY
+TTL minute + INTERVAL 14 DAY
 SETTINGS ttl_only_drop_parts = 1;
 
-CREATE MATERIALIZED VIEW dbperf.pg_samples_1m_mv ON CLUSTER '{cluster}'
-TO dbperf.pg_samples_1m_local AS
+CREATE MATERIALIZED VIEW dbperf.pg_samples_1m_mv TO dbperf.pg_samples_1m AS
 SELECT target_id, toStartOfMinute(ts) AS minute, count() AS n_samples, sum(n_active) AS n_active
-FROM dbperf.pg_samples_local
+FROM dbperf.pg_samples
 GROUP BY target_id, minute;
-
-CREATE TABLE dbperf.pg_samples_1m ON CLUSTER '{cluster}' AS dbperf.pg_samples_1m_local
-ENGINE = Distributed('{cluster}', dbperf, pg_samples_1m_local, target_id);
 ```
 
 Запросы к SummingMergeTree всегда с `GROUP BY` и `sum(n_elements)`: слияние строк
@@ -417,7 +402,7 @@ ENGINE = Distributed('{cluster}', dbperf, pg_samples_1m_local, target_id);
 | `IPv6` для адреса | 16 байт фиксированной длины, при сортировке по цели почти всегда одинаков в соседних строках, сжимается до байтов |
 | Текст отдельно | Текст до 4 КБ на строку сделал бы сырую таблицу в десятки раз тяжелее; хэш — 8 байт, а после ZSTD меньше |
 | `SummingMergeTree` для 1m | Нужны только суммы счётчиков; `AggregatingMergeTree` понадобится, когда появятся квантили |
-| `Distributed` по `target_id` | Данные одной цели на одном шарде: запрос цели выполняется на одном узле, вставка не разбрасывает батч |
+| Один узел без `Distributed` | Для MVP нет шардов и реплик: меньше движущихся частей, вставка идёт прямо в таблицы. При переходе на кластер шардирование по `target_id` держит данные цели на одном узле |
 
 ### 8.4. Запросы чтения
 
@@ -451,7 +436,7 @@ ORDER BY a.bucket, slice;
 
 ### 8.5. Расширение на `pg_locks` (следующий этап)
 
-Таблица `pg_locks_local` с тем же ключом `(target_id, ts, pid)`, колонками объекта
+Таблица `pg_locks` с тем же ключом `(target_id, ts, pid)`, колонками объекта
 блокировки, `mode`, `granted`, `waitstart` и минутный счётчик `n_blocking`/`n_blocked`,
 считаемый в коллекторе самосоединением снимка (логика `data_locks.yaml`). Дерево на
 временную точку строится в слое `query`.
@@ -718,19 +703,33 @@ message GetQueryTextResponse { string query = 1; int64 last_seen = 2; bool trunc
 |---|---|---|---|
 | `pg_activity`, в сутки | 52 ГБ | 140 ГБ | 690 ГБ |
 | `pg_activity`, 7 дней | 0,36 ТБ | 1,0 ТБ | 4,8 ТБ |
-| `pg_activity_1m`, 30 дней | 0,45 ТБ | 1,2 ТБ | 4,5 ТБ |
-| Итого с репликацией ×2 | 1,7 ТБ | 4,6 ТБ | 19 ТБ |
+| `pg_activity_1m`, 14 дней | 0,21 ТБ | 0,56 ТБ | 2,1 ТБ |
+| `pg_samples` и `pg_samples_1m` | 0,02 ТБ | 0,02 ТБ | 0,04 ТБ |
+| **Итого на одном узле** | **0,6 ТБ** | **1,6 ТБ** | **6,9 ТБ** |
+
+На цель в среднем сценарии приходится 2,8 МБ сырых строк в сутки и около 0,7 МБ минутного
+агрегата в сутки, то есть **29 МБ на цель** при удержании 7 и 14 дней. Отсюда предел
+одного узла по диску при заполнении не выше 70 %:
+
+| Диск узла | Полезно (70 %) | Максимум целей при 10 с | Что ужать, чтобы вместить 50 000 |
+|---|---|---|---|
+| 2 ТБ NVMe | 1,4 ТБ | **48 000** | сырые 5 дней вместо 7 → 24 МБ на цель → 58 000 целей |
+| 4 ТБ NVMe | 2,8 ТБ | **96 000** | ничего, запас двукратный |
+| 8 ТБ NVMe | 5,6 ТБ | 190 000 | — |
+
+Агрегат на 30 дней (как в первой редакции) давал бы 2,2 ТБ на 50 000 целей и не оставлял
+запаса на узле 4 ТБ; 14 дней — пересчитанное значение.
 
 ### 10.3. Вставка
 
-При 10 экземплярах коллектора и сбросе раз в 3 с — 3–4 вставки в секунду на таблицу на
-кластер, по 12 000 строк в среднем сценарии. Это в пределах документированной нормы
-(≈1 вставка/с рекомендуется, до 10/с терпимо). Три materialized view на вставку добавляют
-работу, сопоставимую с самой вставкой. По опыту, один узел на 16 ядрах принимает
-пакетными вставками сотни тысяч узких строк в секунду, так что 40 000 строк/с — доли
-мощности одного узла; размер кластера задаётся объёмом диска и чтением, а не вставкой.
-В высоком сценарии 200 000 строк/с и 17 млрд строк в сутки — уже существенная нагрузка на
-слияния, и его следует закладывать как 4 шарда.
+При 10 экземплярах коллектора и сбросе раз в 5 с — 2 вставки в секунду в `pg_activity`
+и 2 в `pg_samples` на единственный узел, по 20 000 строк в среднем сценарии. Это в пределах
+документированной нормы (≈1 вставка/с рекомендуется, до 10/с терпимо). Две materialized
+view на вставку добавляют работу, сопоставимую с самой вставкой. По опыту, один узел на 16
+ядрах принимает пакетными вставками сотни тысяч узких строк в секунду, так что 40 000
+строк/с — доли мощности одного узла; предел одного узла задаётся диском и чтением, а не
+вставкой. Высокий сценарий (200 000 строк/с, 17 млрд строк и 690 ГБ в сутки) на один узел не
+помещается ни по диску, ни по слияниям; он остаётся за рамками MVP и требует шардирования.
 
 ### 10.4. Чтение
 
@@ -742,20 +741,26 @@ message GetQueryTextResponse { string query = 1; int64 last_seen = 2; bool trunc
 
 Одновременные пользователи: 50 000 баз подразумевают сотни операторов, но дашборд открыт
 одновременно у единиц–десятков; при автообновлении раз в 10 с это десятки запросов
-в секунду, каждый на один шард. Лимит — семафор в API.
+в секунду на один узел. Лимит — семафор в API.
 
-### 10.5. Вердикт и размер кластера
+### 10.5. Вердикт и размер узла для MVP
 
-| Сценарий | Кластер ClickHouse | Коллектор |
+| Сценарий | Узел ClickHouse (один, без реплик) | Коллектор |
 |---|---|---|
-| Низкий | 1 шард × 2 реплики, 8 ядер, 32 ГБ, 2 ТБ NVMe | 4 экземпляра × 12 500 целей |
-| Средний | **2 шарда × 2 реплики, 16 ядер, 64 ГБ, 4 ТБ NVMe каждый** | 10 экземпляров × 5 000 целей, 2 vCPU, 2 ГБ |
-| Высокий | 4 шарда × 2 реплики, 32 ядра, 128 ГБ, 8 ТБ NVMe | 20 экземпляров, интервал 5 с |
+| Низкий | 8 ядер, 32 ГБ, 2 ТБ NVMe (0,6 ТБ данных) | 4 экземпляра × 12 500 целей |
+| Средний | **16 ядер, 64 ГБ, 4 ТБ NVMe (1,6 ТБ данных, 57 % полезного места)** | 10 экземпляров × 5 000 целей, 2 vCPU, 2 ГБ |
+| Высокий | не помещается на один узел; за рамками MVP | — |
 
-ClickHouse справляется: ни одна величина не приближается к пределам одного узла по вставке,
-а объём хранения в среднем сценарии — единицы терабайт. Риски не в ClickHouse, а в
-коллекторе (50 000 постоянных соединений, 5 000 запросов в секунду к наблюдаемым базам) и
-в числе частей при слишком частых вставках; оба закрываются архитектурой разделов 3.1 и 7.
+Один узел справляется со средним сценарием: вставка 40 000 строк/с и 4 вставки в секунду —
+доли мощности узла, хранение 1,6 ТБ укладывается в 4 ТБ с запасом. Если узел будет 2 ТБ,
+пересчитанные значения: либо не больше 48 000 целей, либо 50 000 целей с удержанием сырых
+строк 5 дней (см. 10.2). Риски не в ClickHouse, а в коллекторе (50 000 постоянных
+соединений, 5 000 запросов в секунду к наблюдаемым базам) и в числе частей при слишком
+частых вставках; оба закрываются архитектурой разделов 3.1 и 7.
+
+Цена одного узла: нет отказоустойчивости. Падение диска теряет историю, недоступность узла
+на время дольше 30 с теряет данные из буферов коллекторов (раздел 7). Для MVP это принято;
+реплика добавляется после MVP переименованием движков в `Replicated*`.
 
 Экземпляр коллектора: 5 000 goroutine и 5 000 сокетов, около 100 КБ буферов `pgconn` на
 соединение — 0,5 ГБ, 500 запросов в секунду и 4 000 строк в секунду на разбор — доли ядра.
@@ -767,6 +772,45 @@ ClickHouse справляется: ни одна величина не приб�
 эмулируются заглушкой `TargetSource` и фейковым скрапером, который выдаёт строки с реальным
 распределением) и пишет в ClickHouse сутки данных за час.
 
+### 10.6. Результаты проверки на стенде (21.10.2026)
+
+Стенд `services/dbperf/deploy/docker-compose.yaml`: PostgreSQL 16.14 с pgbench на 20 клиентах,
+ClickHouse 25.8, один экземпляр dbperf в роли `all`. Синтетический прогон генератором
+`test/load`: 5 000 целей, интервал 10 с, в среднем 8 активных сессий, 10 минут данных.
+
+| Таблица | Строк | Сжато | Байт на строку | Коэффициент сжатия |
+|---|---|---|---|---|
+| `pg_activity` | 2 249 160 | 21,7 МБ | **10,1** | 5,8 |
+| `pg_activity_1m` | 2 246 463 | 19,9 МБ | 9,3 | 4,5 |
+| `pg_samples` | 299 378 | 0,4 МБ | 1,3 | 9,0 |
+| `pg_samples_1m` | 55 016 | 0,2 МБ | 3,6 | 4,4 |
+| `pg_query_texts` | 11 880 | 0,1 МБ | 7,1 | 6,8 |
+
+Самые тяжёлые колонки `pg_activity`: `query_hash`, `pid`, `client_addr` — по 1,6 байта; `ts`
+и `target_id` после Delta — 0,2 и 0,01 байта. Расчёт раздела 10.2 брал 40 байт на строку, факт
+в четыре раза меньше: 50 000 целей в среднем сценарии — **35 ГБ сырых строк в сутки и 0,25 ТБ
+за 7 дней** вместо 1,0 ТБ.
+
+Оговорка по минутному агрегату: на синтетических данных у каждой строки случайные `pid`,
+адрес и запрос, поэтому агрегат не схлопнул строки (2,25 млн против 2,25 млн сырых) и занял
+столько же места. На реальной нагрузке повторов больше; верхняя граница для расчёта — агрегат
+за 14 дней равен двум объёмам сырых строк за 7 дней, то есть не более 0,5 ТБ на 50 000 целей.
+Итог для среднего сценария — не более 0,8 ТБ на одном узле.
+
+Проверки устойчивости:
+- ClickHouse остановлен на 25 с: 4 неудачные вставки, очередь sink дошла до 0 после
+  восстановления, отброшенных строк 0, в `pg_samples` нет разрывов больше одного тика.
+- Перезапуск PostgreSQL: оба цикла переподключились через один интервал, статус цели в
+  `GetTargetStatus` вернулся в `CONNECTED`.
+- gRPC: `ListTargets`, `GetTargetStatus`, `GetActivityTimeSeries` (уровень raw),
+  `GetActivityTotals` на диапазоне 3 ч (уровень 1m), `GetActivityTop` с вложенным срезом,
+  `ListSessions` с фильтром, `GetQueryText` — отвечают ожидаемыми структурами.
+- Найдено и исправлено: входной канал sink на 4 096 батчей переполнялся при залповой выдаче
+  генератора (7 731 отброшенная строка); увеличен до 32 768.
+
+Не выполнено: полный прогон на 50 000 целей и час данных (этап 6) и измерение p95 запросов
+под нагрузкой — требуют узла с параметрами из 10.5, на ноутбуке не воспроизводятся.
+
 ---
 
 ## 11. Этапы реализации
@@ -776,11 +820,11 @@ ClickHouse справляется: ни одна величина не приб�
 | 0 | Каркас `services/dbperf`: go.mod, cmd, config, proto, `buf generate`, Makefile, линтер | `go build ./...` и `buf lint` проходят, бинарник стартует с `--role=all` |
 | 1 | Слой 1: `TargetSource` YAML и PostgreSQL, аренда целей | Два экземпляра делят 20 целей из YAML, при остановке одного второй забирает его цели в течение 60 с |
 | 2 | Слой 2: `pgconn`, цикл цели, запрос, разбор строк, CPU-правило, статусы | На стенде с pgbench строки совпадают с `SELECT … FROM pg_stat_activity` в тот же момент; обрыв PostgreSQL → переподключение с backoff |
-| 3 | Схема ClickHouse из раздела 8 на docker-compose (один узел, без `ON CLUSTER`), слой 3 с батчами и ретраями | За минуту в `pg_activity` и `pg_samples` строки с правильными `ts` и `target_id`; остановка ClickHouse на 20 с не теряет данных |
+| 3 | Схема ClickHouse из раздела 8 на docker-compose, слой 3 с батчами и ретраями | За минуту в `pg_activity` и `pg_samples` строки с правильными `ts` и `target_id`; остановка ClickHouse на 20 с не теряет данных |
 | 4 | Слой `query`: запросы раздела 8.4, выбор уровня, top-N с остатком, вложенный срез | Юнит-тесты на SQL-генерацию; интеграционный тест: СКАС по ручному расчёту совпадает |
 | 5 | gRPC `TargetService` и `ActivityService`, лимиты, ошибки, метрики Prometheus | `grpcurl` воспроизводит два примера из `dbperf_api_tech_doc.txt`; дашборд рисуется из ответов |
-| 6 | Нагрузочный тест: 50 000 синтетических целей, 10 экземпляров, кластер 2×2 | Вставка без «too many parts» 2 часа, запрос часа цели < 200 мс при p95, размер данных в пределах оценки 10.2 ±50 % |
-| 7 | Эксплуатация: k8s-манифесты, graceful shutdown с освобождением аренды, health, алерты на `dbperf_sink_dropped_rows` и число отключённых целей | Перекат коллектора без потери больше одного тика на цель |
+| 6 | Нагрузочный тест: 50 000 синтетических целей, 10 экземпляров, один узел 16 ядер / 64 ГБ / 4 ТБ | Вставка без «too many parts» 2 часа, запрос часа цели < 200 мс при p95, размер данных в пределах оценки 10.2 ±50 % |
+| 7 | Эксплуатация: docker-compose как эталон развёртывания (k8s на этом этапе не делается), graceful shutdown с освобождением аренды, health, алерты на `dbperf_sink_dropped_rows` и число отключённых целей | Перекат коллектора без потери больше одного тика на цель |
 
 Этапы 0–2 и 3 независимы и могут идти параллельно; 4 зависит от 3; 5 от 4; 6 от 2, 3, 5.
 
@@ -794,7 +838,7 @@ ClickHouse справляется: ни одна величина не приб�
    не хранятся.
 3. **Интервал 10 с** по умолчанию, 5 с на цель по конфигурации.
 4. **Ключ SQL — `query_id`**, для PostgreSQL ≤ 13 хэш текста; текст в отдельной таблице.
-5. **Удержание**: сырые 7 дней, минутный агрегат 30 дней.
-6. **Кластер**: 2 шарда × 2 реплики для среднего сценария, шардирование по `target_id`.
+5. **Удержание**: сырые 7 дней, минутный агрегат 14 дней (пересчитано под один узел 4 ТБ).
+6. **Один узел ClickHouse без шардов и реплик** для MVP: 16 ядер, 64 ГБ, 4 ТБ NVMe; при узле 2 ТБ — не больше 48 000 целей или сырые 5 дней.
 7. **Реестр целей в PostgreSQL метабазы** с арендой; YAML только для стенда.
 8. `pg_locks` — следующим этапом, модель заложена в 8.5.
