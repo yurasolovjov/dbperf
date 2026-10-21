@@ -72,7 +72,7 @@ services:
       dockerfile: Dockerfile.prebuilt
     depends_on:
       - dbperf
-    ports: ["8080:80"]
+    ports: ["8081:80"]  # 8080 is often taken by other local tools
     restart: unless-stopped
 
 volumes:

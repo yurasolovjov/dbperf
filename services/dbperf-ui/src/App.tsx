@@ -3,7 +3,9 @@ import { api } from './api/client'
 import type { Dimension, Filter, TimeRange } from './api/types'
 import { ActivityChart } from './components/ActivityChart'
 import { Controls, type Period } from './components/Controls'
+import { DimensionOrder } from './components/DimensionOrder'
 import { FiltersBar } from './components/FiltersBar'
+import { FlameGraph } from './components/FlameGraph'
 import { QueryModal } from './components/QueryModal'
 import { TopBar } from './components/TopBar'
 import { TopTable, type Unit } from './components/TopTable'
@@ -12,6 +14,8 @@ import { useApi } from './lib/useApi'
 const RAW_RANGE_LIMIT = 2 * 3600 // seconds; longer ranges are served from the 1m level
 const OVERVIEW_POINTS = 120
 const DEFAULT_WINDOW = 300
+const DEFAULT_PROFILE_ORDER: Dimension[] = ['DATNAME', 'QUERY', 'WAIT_EVENT_TYPE', 'WAIT_EVENT']
+type WindowView = 'profile' | 'chart'
 
 // The scraper stores every active backend, walsender and autovacuum workers
 // included; the dashboard shows client backends unless background processes
@@ -52,6 +56,8 @@ export default function App() {
   const [expanded, setExpanded] = useState(false)
   const [unit, setUnit] = useState<Unit>('PERCENT')
   const [queryHash, setQueryHash] = useState<string | null>(null)
+  const [view, setView] = useState<WindowView>('profile')
+  const [profileOrder, setProfileOrder] = useState<Dimension[]>(DEFAULT_PROFILE_ORDER)
 
   const range = useMemo(() => periodRange(period, now), [period, now])
   const win = windowSel ?? defaultWindow(range)
@@ -106,10 +112,18 @@ export default function App() {
   )
   const detail = useApi(
     (s) =>
-      targetId
+      targetId && view === 'chart'
         ? api.timeSeries({ targetId, range: win, stepSeconds: 10, slicing: { dimension, limit: 10 }, filters: queryFilters, excludeSelf: true, maxPoints: 720 }, s)
         : Promise.resolve(null),
-    [targetId, win.startUnix, win.endUnix, dimension, queryFilters],
+    [targetId, win.startUnix, win.endUnix, dimension, queryFilters, view],
+    0,
+  )
+  const profile = useApi(
+    (s) =>
+      targetId && view === 'profile'
+        ? api.profile({ targetId, range: win, dimensions: profileOrder, filters: queryFilters, excludeSelf: true, minSamples: 1 }, s)
+        : Promise.resolve(null),
+    [targetId, win.startUnix, win.endUnix, profileOrder, queryFilters, view],
     0,
   )
   const top = useApi(
@@ -144,7 +158,8 @@ export default function App() {
     setTableDim(d)
   }
 
-  const loading = overview.loading || detail.loading || top.loading
+  const tickSeconds = targets.data?.find((t) => t.targetId === targetId)?.intervalSec ?? 10
+  const loading = overview.loading || detail.loading || top.loading || profile.loading
   const error = targets.error || overview.error || detail.error
 
   return (
@@ -154,7 +169,7 @@ export default function App() {
       {error && <div className="error">{error}</div>}
 
       <section className="card">
-        <ActivityChart data={overview.data} dimension={dimension} height={190} window={win} onWindow={(w) => setWindowSel(w)} tickSeconds={false} emptyText="Нет данных за период" />
+        <ActivityChart data={overview.data} dimension={dimension} height={190} window={win} onWindow={(w) => setWindowSel(w)} tickSeconds={false} emptyText="Нет данных за период" stepped={false} />
         <div className="hint muted">Выделите область на графике, чтобы задать окно для детального графика и таблицы</div>
       </section>
 
@@ -170,15 +185,37 @@ export default function App() {
           expanded={expanded}
           onExpand={() => setExpanded((v) => !v)}
         />
-        <ActivityChart
-          data={detail.data}
-          dimension={dimension}
-          height={expanded ? 420 : 220}
-          totalOnly={totalOnly}
-          onLegendClick={(v) => addFilter(dimension, v)}
-          tickSeconds={win.endUnix - win.startUnix <= 1800}
-          emptyText="Нет активных сессий в окне"
-        />
+        <div className="window-head">
+          <div className="view-toggle" role="group" aria-label="Вид окна">
+            <button className={`btn small ${view === 'profile' ? 'active' : ''}`} onClick={() => setView('profile')} title="Flame graph: доля времени по вложенным разрезам">
+              Профиль
+            </button>
+            <button className={`btn small ${view === 'chart' ? 'active' : ''}`} onClick={() => setView('chart')} title="Временной ряд по снимкам окна">
+              График
+            </button>
+          </div>
+          {view === 'profile' && <DimensionOrder order={profileOrder} onChange={setProfileOrder} rawLevel={rawLevel} />}
+        </div>
+        {profile.error && view === 'profile' && <div className="error">{profile.error}</div>}
+        {view === 'profile' ? (
+          <FlameGraph
+            data={profile.data}
+            dimensions={profileOrder}
+            tickSeconds={tickSeconds}
+            onFilter={addFilter}
+            onQueryText={setQueryHash}
+          />
+        ) : (
+          <ActivityChart
+            data={detail.data}
+            dimension={dimension}
+            height={expanded ? 420 : 220}
+            totalOnly={totalOnly}
+            onLegendClick={(v) => addFilter(dimension, v)}
+            tickSeconds={win.endUnix - win.startUnix <= 1800}
+            emptyText="Нет активных сессий в окне"
+          />
+        )}
       </section>
 
       <TopTable

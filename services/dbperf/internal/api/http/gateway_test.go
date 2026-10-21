@@ -54,7 +54,8 @@ func TestListTargetsJSON(t *testing.T) {
 	if rr.Code != 200 || ft.gotFilter != "p" {
 		t.Fatalf("code %d filter %q body %s", rr.Code, ft.gotFilter, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"targetId":7`) || !strings.Contains(rr.Body.String(), `"nextPageToken":""`) {
+	compact := strings.NewReplacer(" ", "", "\n", "").Replace(rr.Body.String())
+	if !strings.Contains(compact, `"targetId":7`) || !strings.Contains(compact, `"nextPageToken":""`) {
 		t.Fatalf("body %s", rr.Body.String())
 	}
 }
@@ -75,7 +76,9 @@ func TestTimeSeriesDecodesEnumsAndInt64(t *testing.T) {
 		fa.got.GetSlicing().GetDimension() != dbperfv1.Dimension_WAIT_EVENT_TYPE || len(fa.got.GetFilters()) != 1 || !fa.got.GetExcludeSelf() {
 		t.Fatalf("decoded %+v", fa.got)
 	}
-	if !strings.Contains(rr.Body.String(), `"timestamps":["1","2"]`) {
+	// protojson randomizes whitespace on purpose; compare without it.
+	compact := strings.NewReplacer(" ", "", "\n", "").Replace(rr.Body.String())
+	if !strings.Contains(compact, `"timestamps":["1","2"]`) {
 		t.Fatalf("body %s", rr.Body.String())
 	}
 }

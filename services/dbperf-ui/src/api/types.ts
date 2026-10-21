@@ -118,3 +118,16 @@ export interface QueryTextResponse {
   lastSeen: number
   truncated: boolean
 }
+
+export interface ProfilePath {
+  values: string[]
+  samples: number
+}
+
+export interface ProfileResponse {
+  nSamples: number
+  totalSamples: number
+  level: string
+  paths: ProfilePath[]
+  queryShortTexts: Record<string, string>
+}

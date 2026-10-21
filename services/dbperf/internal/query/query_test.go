@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -122,5 +123,21 @@ func TestTopKeysSumAndPeak(t *testing.T) {
 	small := map[string]uint64{"a": 1, "b": 3}
 	if got := topKeysSumAndPeak(small, map[string]uint64{"a": 9, "b": 1}, 10); strings.Join(got, ",") != "b,a" {
 		t.Fatalf("small: %v", got)
+	}
+}
+
+func TestProfileValidation(t *testing.T) {
+	s := &Service{levels: levelsForTest(), maxPoints: 2000}
+	start := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	rng := Range{Start: start, End: start.Add(time.Hour)}
+	if _, err := s.Profile(context.Background(), ProfileRequest{Range: rng}); err == nil {
+		t.Fatal("empty dimensions must be rejected")
+	}
+	if _, err := s.Profile(context.Background(), ProfileRequest{Range: rng, Dimensions: []Dimension{DimQuery, DimQuery}}); err == nil {
+		t.Fatal("repeated dimensions must be rejected")
+	}
+	long := Range{Start: start, End: start.Add(24 * time.Hour)}
+	if _, err := s.Profile(context.Background(), ProfileRequest{Range: long, Dimensions: []Dimension{DimPID}}); err == nil {
+		t.Fatal("pid on the 1m level must be rejected")
 	}
 }

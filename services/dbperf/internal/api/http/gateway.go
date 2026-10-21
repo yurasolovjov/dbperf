@@ -52,6 +52,7 @@ func (g *Gateway) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/activity/totals", handle(g, g.activity.GetActivityTotals))
 	mux.Handle("POST /api/v1/activity/sessions", handle(g, g.activity.ListSessions))
 	mux.Handle("POST /api/v1/activity/query-text", handle(g, g.activity.GetQueryText))
+	mux.Handle("POST /api/v1/activity/profile", handle(g, g.activity.GetActivityProfile))
 	// GET convenience for the target list
 	mux.HandleFunc("GET /api/v1/targets", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := g.targets.ListTargets(r.Context(), &dbperfv1.ListTargetsRequest{NameFilter: r.URL.Query().Get("name")})

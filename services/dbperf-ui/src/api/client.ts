@@ -1,6 +1,7 @@
 import type {
   Dimension,
   Filter,
+  ProfileResponse,
   QueryTextResponse,
   SessionsResponse,
   Target,
@@ -59,6 +60,8 @@ const int64Keys = new Set([
   'stateChange',
   'sampleTs',
   'lastSeen',
+  'samples',
+  'totalSamples',
 ])
 
 function reviveInt64(this: unknown, key: string, value: unknown): unknown {
@@ -104,6 +107,11 @@ export const api = {
 
   queryText: (targetId: number, queryHash: string, signal?: AbortSignal) =>
     post<QueryTextResponse>('/activity/query-text', { targetId, queryHash }, signal),
+
+  profile: (
+    p: { targetId: number; range: TimeRange; dimensions: Dimension[]; filters: Filter[]; excludeSelf: boolean; minSamples?: number },
+    signal?: AbortSignal,
+  ) => post<ProfileResponse>('/activity/profile', p, signal),
 }
 
 export const DIMENSIONS: { key: Dimension; label: string; column: string }[] = [

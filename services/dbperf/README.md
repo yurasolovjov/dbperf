@@ -21,7 +21,7 @@
 make up        # из корня репозитория: PostgreSQL 16 + pgbench, ClickHouse 25.8, dbperf, ui; бинарник и бандл собираются на хосте
 ```
 
-Порты: gRPC `9090`, JSON-шлюз, метрики и `/healthz` `9091`, фронтенд `8080`, ClickHouse `9000`/`8123`, PostgreSQL `5432`.
+Порты: gRPC `9090`, JSON-шлюз, метрики и `/healthz` `9091`, фронтенд `8081`, ClickHouse `9000`/`8123`, PostgreSQL `5432`.
 
 Проверка данных:
 

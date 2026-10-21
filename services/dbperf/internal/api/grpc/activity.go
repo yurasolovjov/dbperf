@@ -132,6 +132,33 @@ func (s *activityServer) GetQueryText(ctx context.Context, req *dbperfv1.GetQuer
 	return &dbperfv1.GetQueryTextResponse{Query: text, LastSeen: seen.Unix(), Truncated: truncated}, nil
 }
 
+func (s *activityServer) GetActivityProfile(ctx context.Context, req *dbperfv1.ActivityProfileRequest) (*dbperfv1.ActivityProfileResponse, error) {
+	dims := make([]query.Dimension, 0, len(req.GetDimensions()))
+	for _, d := range req.GetDimensions() {
+		dims = append(dims, query.Dimension(d))
+	}
+	res, err := s.deps.Query.Profile(ctx, query.ProfileRequest{
+		TargetID:    req.GetTargetId(),
+		Range:       toRange(req.GetRange()),
+		Dimensions:  dims,
+		Filters:     toFilters(req.GetFilters()),
+		ExcludeSelf: req.GetExcludeSelf(),
+		MinSamples:  int(req.GetMinSamples()),
+		MaxPaths:    int(req.GetMaxPaths()),
+	})
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	out := &dbperfv1.ActivityProfileResponse{
+		NSamples: int64(res.NSamples), TotalSamples: int64(res.TotalSamples), Level: res.Level,
+		QueryShortTexts: res.QueryTexts,
+	}
+	for _, p := range res.Paths {
+		out.Paths = append(out.Paths, &dbperfv1.ProfilePath{Values: p.Values, Samples: int64(p.Samples)})
+	}
+	return out, nil
+}
+
 var errNoRows = errors.New("no rows")
 
 func isNoRows(err error) bool {

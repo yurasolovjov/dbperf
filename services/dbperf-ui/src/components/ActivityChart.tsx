@@ -15,11 +15,15 @@ interface Props {
   onLegendClick?: (value: string) => void
   tickSeconds?: boolean
   emptyText?: string
+  // Stepped lines hold a bucket's value until the next bucket: honest for the
+  // detail chart, where a point is a single snapshot. The overview averages
+  // many snapshots per bucket and reads better as a smooth line.
+  stepped?: boolean
 }
 
 // ActivityChart draws a stacked area of average active sessions per bucket.
 // With onWindow set, a horizontal box selection becomes the sliding window.
-export function ActivityChart({ data, dimension, height, totalOnly, window, onWindow, onLegendClick, tickSeconds, emptyText }: Props) {
+export function ActivityChart({ data, dimension, height, totalOnly, window, onWindow, onLegendClick, tickSeconds, emptyText, stepped = true }: Props) {
   const { traces, layout } = useMemo(() => {
     const gapped = data ? withGaps(data) : null
     const x = (gapped?.timestamps ?? []).map(plotTime)
@@ -34,7 +38,7 @@ export function ActivityChart({ data, dimension, height, totalOnly, window, onWi
           y: gapped.totals,
           fill: 'tozeroy',
           connectgaps: false,
-          line: { color: '#2a78d6', width: 1.5, shape: 'hv' },
+          line: { color: '#2a78d6', width: 1.5, shape: stepped ? 'hv' : 'linear' },
           fillcolor: 'rgba(42,120,214,0.25)',
           hovertemplate: '%{y:.2f} сессий<extra>всего</extra>',
         })
@@ -49,7 +53,7 @@ export function ActivityChart({ data, dimension, height, totalOnly, window, onWi
             y: s.values,
             stackgroup: 'one',
             connectgaps: false,
-            line: { color, width: 0.5, shape: 'hv' },
+            line: { color, width: 0.5, shape: stepped ? 'hv' : 'linear' },
             fillcolor: color,
             hovertemplate: `%{y:.2f}<extra>${escapeHtml(sliceLabel(dimension, s.slice))}</extra>`,
             meta: s.slice.value,
@@ -117,7 +121,7 @@ export function ActivityChart({ data, dimension, height, totalOnly, window, onWi
       ],
     }
     return { traces, layout }
-  }, [data, dimension, height, totalOnly, window, onWindow, onLegendClick, tickSeconds, emptyText])
+  }, [data, dimension, height, totalOnly, window, onWindow, onLegendClick, tickSeconds, emptyText, stepped])
 
   return (
     <Plot

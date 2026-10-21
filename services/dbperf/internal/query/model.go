@@ -201,3 +201,29 @@ var ErrInvalid = errors.New("invalid request")
 func invalid(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, a...))
 }
+
+// ProfileRequest asks for sample counts along an ordered path of dimensions.
+type ProfileRequest struct {
+	TargetID    uint32
+	Range       Range
+	Dimensions  []Dimension
+	Filters     []Filter
+	ExcludeSelf bool
+	MinSamples  int
+	MaxPaths    int
+}
+
+// ProfilePath is one leaf of the profile.
+type ProfilePath struct {
+	Values  []string
+	Samples uint64
+}
+
+// ProfileResult is the flame graph input.
+type ProfileResult struct {
+	NSamples     uint64
+	TotalSamples uint64
+	Level        string
+	Paths        []ProfilePath
+	QueryTexts   map[string]string
+}

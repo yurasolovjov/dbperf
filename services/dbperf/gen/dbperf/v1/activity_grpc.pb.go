@@ -24,6 +24,7 @@ const (
 	ActivityService_GetActivityTotals_FullMethodName     = "/dbperf.v1.ActivityService/GetActivityTotals"
 	ActivityService_ListSessions_FullMethodName          = "/dbperf.v1.ActivityService/ListSessions"
 	ActivityService_GetQueryText_FullMethodName          = "/dbperf.v1.ActivityService/GetQueryText"
+	ActivityService_GetActivityProfile_FullMethodName    = "/dbperf.v1.ActivityService/GetActivityProfile"
 )
 
 // ActivityServiceClient is the client API for ActivityService service.
@@ -43,6 +44,9 @@ type ActivityServiceClient interface {
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	// Full query text by hash.
 	GetQueryText(ctx context.Context, in *GetQueryTextRequest, opts ...grpc.CallOption) (*GetQueryTextResponse, error)
+	// Profile of a window: sample counts along an ordered path of dimensions,
+	// the input of a flame graph. Like pprof with labels turned into frames.
+	GetActivityProfile(ctx context.Context, in *ActivityProfileRequest, opts ...grpc.CallOption) (*ActivityProfileResponse, error)
 }
 
 type activityServiceClient struct {
@@ -103,6 +107,16 @@ func (c *activityServiceClient) GetQueryText(ctx context.Context, in *GetQueryTe
 	return out, nil
 }
 
+func (c *activityServiceClient) GetActivityProfile(ctx context.Context, in *ActivityProfileRequest, opts ...grpc.CallOption) (*ActivityProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivityProfileResponse)
+	err := c.cc.Invoke(ctx, ActivityService_GetActivityProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ActivityServiceServer is the server API for ActivityService service.
 // All implementations must embed UnimplementedActivityServiceServer
 // for forward compatibility.
@@ -120,6 +134,9 @@ type ActivityServiceServer interface {
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	// Full query text by hash.
 	GetQueryText(context.Context, *GetQueryTextRequest) (*GetQueryTextResponse, error)
+	// Profile of a window: sample counts along an ordered path of dimensions,
+	// the input of a flame graph. Like pprof with labels turned into frames.
+	GetActivityProfile(context.Context, *ActivityProfileRequest) (*ActivityProfileResponse, error)
 	mustEmbedUnimplementedActivityServiceServer()
 }
 
@@ -144,6 +161,9 @@ func (UnimplementedActivityServiceServer) ListSessions(context.Context, *ListSes
 }
 func (UnimplementedActivityServiceServer) GetQueryText(context.Context, *GetQueryTextRequest) (*GetQueryTextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetQueryText not implemented")
+}
+func (UnimplementedActivityServiceServer) GetActivityProfile(context.Context, *ActivityProfileRequest) (*ActivityProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetActivityProfile not implemented")
 }
 func (UnimplementedActivityServiceServer) mustEmbedUnimplementedActivityServiceServer() {}
 func (UnimplementedActivityServiceServer) testEmbeddedByValue()                         {}
@@ -256,6 +276,24 @@ func _ActivityService_GetQueryText_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_GetActivityProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ActivityProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).GetActivityProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_GetActivityProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).GetActivityProfile(ctx, req.(*ActivityProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ActivityService_ServiceDesc is the grpc.ServiceDesc for ActivityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -282,6 +320,10 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQueryText",
 			Handler:    _ActivityService_GetQueryText_Handler,
+		},
+		{
+			MethodName: "GetActivityProfile",
+			Handler:    _ActivityService_GetActivityProfile_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

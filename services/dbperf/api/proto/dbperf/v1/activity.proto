@@ -17,6 +17,9 @@ service ActivityService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   // Full query text by hash.
   rpc GetQueryText(GetQueryTextRequest) returns (GetQueryTextResponse);
+  // Profile of a window: sample counts along an ordered path of dimensions,
+  // the input of a flame graph. Like pprof with labels turned into frames.
+  rpc GetActivityProfile(ActivityProfileRequest) returns (ActivityProfileResponse);
 }
 
 enum Dimension {
@@ -164,4 +167,27 @@ message GetQueryTextResponse {
   string query = 1;
   int64 last_seen = 2;
   bool truncated = 3;
+}
+
+message ActivityProfileRequest {
+  uint32 target_id = 1;
+  TimeRange range = 2;
+  repeated Dimension dimensions = 3; // frame order from root to leaf, 1..6
+  repeated Filter filters = 4;
+  bool exclude_self = 5;
+  int32 min_samples = 6; // paths with fewer samples are folded into the root remainder
+  int32 max_paths = 7;   // <= 20000, default 5000
+}
+
+message ProfilePath {
+  repeated string values = 1; // one value per requested dimension
+  int64 samples = 2;
+}
+
+message ActivityProfileResponse {
+  int64 n_samples = 1;     // snapshots in the window: samples / n_samples = AAS
+  int64 total_samples = 2; // active rows in the window after filters
+  string level = 3;        // "raw" | "1m"
+  repeated ProfilePath paths = 4;
+  map<string, string> query_short_texts = 5; // hash -> first 64 characters, for QUERY frames
 }
