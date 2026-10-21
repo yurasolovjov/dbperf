@@ -54,17 +54,17 @@ type Scraper struct {
 
 // ClickHouse configures layer 3 and the read side.
 type ClickHouse struct {
-	Addrs              []string      `yaml:"addrs"`
-	Database           string        `yaml:"database"`
-	User               string        `yaml:"user"`
-	Password           string        `yaml:"password"`
-	FlushInterval      time.Duration `yaml:"flush_interval"`
-	FlushRows          int           `yaml:"flush_rows"`
-	MaxPendingBatches  int           `yaml:"max_pending_batches"`
-	DialTimeout        time.Duration `yaml:"dial_timeout"`
-	MaxOpenConns       int           `yaml:"max_open_conns"`
-	RawRangeLimit      time.Duration `yaml:"raw_range_limit"` // ranges longer than this use the 1m level
-	RawStep            time.Duration `yaml:"raw_step"`        // smallest step of the raw level
+	Addrs             []string      `yaml:"addrs"`
+	Database          string        `yaml:"database"`
+	User              string        `yaml:"user"`
+	Password          string        `yaml:"password"`
+	FlushInterval     time.Duration `yaml:"flush_interval"`
+	FlushRows         int           `yaml:"flush_rows"`
+	MaxPendingBatches int           `yaml:"max_pending_batches"`
+	DialTimeout       time.Duration `yaml:"dial_timeout"`
+	MaxOpenConns      int           `yaml:"max_open_conns"`
+	RawRangeLimit     time.Duration `yaml:"raw_range_limit"` // ranges longer than this use the 1m level
+	RawStep           time.Duration `yaml:"raw_step"`        // smallest step of the raw level
 }
 
 // API configures the gRPC and HTTP listeners.

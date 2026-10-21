@@ -27,13 +27,13 @@ type Metrics interface {
 
 // Deps are the dependencies of the server.
 type Deps struct {
-	Query    *query.Service
-	Targets  registry.TargetSource
-	Status   *registry.StatusStore // nil when this process is not a collector
-	Instance string
-	Metrics  Metrics
-	Log      *slog.Logger
-	MaxConc  int
+	Query     *query.Service
+	Targets   registry.TargetSource
+	Status    *registry.StatusStore // nil when this process is not a collector
+	Instance  string
+	Metrics   Metrics
+	Log       *slog.Logger
+	MaxConc   int
 	MaxPoints int
 }
 
@@ -60,8 +60,8 @@ func New(d Deps) *Server {
 		return resp, err
 	}
 	s := grpc.NewServer(grpc.ChainUnaryInterceptor(limiter))
-	dbperfv1.RegisterTargetServiceServer(s, &targetServer{deps: d})
-	dbperfv1.RegisterActivityServiceServer(s, &activityServer{deps: d})
+	dbperfv1.RegisterTargetServiceServer(s, NewTargetServer(d))
+	dbperfv1.RegisterActivityServiceServer(s, NewActivityServer(d))
 	hs := health.NewServer()
 	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthpb.RegisterHealthServer(s, hs)
@@ -92,6 +92,13 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		return err
 	}
 }
+
+// NewTargetServer returns the TargetService implementation; the JSON gateway
+// reuses it so both transports share one code path.
+func NewTargetServer(d Deps) dbperfv1.TargetServiceServer { return &targetServer{deps: d} }
+
+// NewActivityServer returns the ActivityService implementation.
+func NewActivityServer(d Deps) dbperfv1.ActivityServiceServer { return &activityServer{deps: d} }
 
 // toStatus maps service errors to gRPC codes.
 func toStatus(err error) error {

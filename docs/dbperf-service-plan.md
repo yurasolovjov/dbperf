@@ -112,7 +112,13 @@ deploy/                             в корне репозитория
 ├── clickhouse/schema.sql           DDL раздела 8
 ├── postgres/init.sql               роль dbperf и база pgbench для стенда
 ├── dbperf/config.yaml, targets.yaml конфигурация dbperf на стенде
-└── docker-compose.yaml             PostgreSQL 16 + pgbench + ClickHouse + dbperf
+└── docker-compose.yaml             PostgreSQL 16 + pgbench + ClickHouse + dbperf + ui
+
+services/dbperf-ui/                 фронтенд (раздел 9.1)
+├── src/api/                        типы и клиент JSON-шлюза
+├── src/components/                 Controls, ActivityChart, FiltersBar, TopTable, QueryModal
+├── nginx/nginx.conf                статика + proxy /api/ → dbperf:9091
+└── Dockerfile, Dockerfile.prebuilt
 ```
 
 Зависимости: `github.com/jackc/pgx/v5/pgconn` (без `pgxpool` и без `pgx.Conn`),
@@ -675,6 +681,27 @@ message GetQueryTextResponse { string query = 1; int64 last_seen = 2; bool trunc
 или `PID` на минутном уровне, `RESOURCE_EXHAUSTED` при превышении лимита одновременных
 запросов к ClickHouse (семафор на экземпляр API, 32).
 
+### 9.1. JSON-шлюз и фронтенд
+
+Браузер не говорит по gRPC, поэтому те же методы доступны по HTTP на порту `:9091`
+(`internal/api/http`): `POST /api/v1/targets/list`, `/targets/status`,
+`/activity/timeseries`, `/activity/top`, `/activity/totals`, `/activity/sessions`,
+`/activity/query-text`. Тело запроса и ответ — protobuf JSON mapping (`protojson`) тех же
+сообщений раздела 9: имена полей в lowerCamel, перечисления строками, `int64` строками.
+Шлюз вызывает те же реализации, что и gRPC-сервер, ошибки отображаются в HTTP-коды
+(`INVALID_ARGUMENT` → 400, `NOT_FOUND` → 404, `RESOURCE_EXHAUSTED` → 429).
+
+Фронтенд `services/dbperf-ui`: React 18, TypeScript, Vite, Plotly (`plotly.js-dist-min`
+через `react-plotly.js`). Страницу отдаёт Nginx, который проксирует `/api/` в dbperf, в
+docker-compose это сервис `ui` на `:8080`. Состав страницы повторяет дашборд «Активность
+сессии» (описание в [dbperf-dashboard-session-activity.md](dbperf-dashboard-session-activity.md)):
+период и разрез, обзорный график за период с выделяемым окном, детальный график за окно с
+фильтрами и «Общей активностью», таблица топа по вкладкам-разрезам с полосой по типам
+ожиданий, переключателем СКАС / % и раскрытием строки, модальное окно с текстом запроса.
+Обзорный график запрашивает ряд с шагом «период / 120», детальный — с шагом 10 с, таблица —
+`GetActivityTop` с вложенным срезом `WAIT_EVENT_TYPE`. Корзины без снимков сервер не
+возвращает, на графике они видны как разрыв.
+
 ---
 
 ## 10. Оценка нагрузки: 50 000 баз
@@ -826,7 +853,7 @@ ClickHouse 25.8, один экземпляр dbperf в роли `all`. Синт�
 | 2 | Слой 2: `pgconn`, цикл цели, запрос, разбор строк, CPU-правило, статусы | На стенде с pgbench строки совпадают с `SELECT … FROM pg_stat_activity` в тот же момент; обрыв PostgreSQL → переподключение с backoff |
 | 3 | Схема ClickHouse из раздела 8 на docker-compose, слой 3 с батчами и ретраями | За минуту в `pg_activity` и `pg_samples` строки с правильными `ts` и `target_id`; остановка ClickHouse на 20 с не теряет данных |
 | 4 | Слой `query`: запросы раздела 8.4, выбор уровня, top-N с остатком, вложенный срез | Юнит-тесты на SQL-генерацию; интеграционный тест: СКАС по ручному расчёту совпадает |
-| 5 | gRPC `TargetService` и `ActivityService`, лимиты, ошибки, метрики Prometheus | `grpcurl` воспроизводит два примера из `dbperf_api_tech_doc.txt`; дашборд рисуется из ответов |
+| 5 | gRPC `TargetService` и `ActivityService`, лимиты, ошибки, метрики Prometheus; JSON-шлюз и фронтенд (9.1) | `grpcurl` воспроизводит два примера из `dbperf_api_tech_doc.txt`; дашборд рисуется из ответов на `:8080` |
 | 6 | Нагрузочный тест: 50 000 синтетических целей, 10 экземпляров, один узел 16 ядер / 64 ГБ / 4 ТБ | Вставка без «too many parts» 2 часа, запрос часа цели < 200 мс при p95, размер данных в пределах оценки 10.2 ±50 % |
 | 7 | Эксплуатация: docker-compose как эталон развёртывания (k8s на этом этапе не делается), graceful shutdown с освобождением аренды, health, алерты на `dbperf_sink_dropped_rows` и число отключённых целей | Перекат коллектора без потери больше одного тика на цель |
 

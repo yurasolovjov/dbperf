@@ -122,8 +122,12 @@ func NewLogger(level, format string) *slog.Logger {
 type Health func() error
 
 // ServeHTTP runs the metrics and health endpoint until ctx is cancelled.
-func ServeHTTP(ctx context.Context, addr string, m *Metrics, health Health, log *slog.Logger) error {
+// Extra routes (the JSON API) are registered by the mount functions.
+func ServeHTTP(ctx context.Context, addr string, m *Metrics, health Health, log *slog.Logger, mounts ...func(*http.ServeMux)) error {
 	mux := http.NewServeMux()
+	for _, mount := range mounts {
+		mount(mux)
+	}
 	mux.Handle("/metrics", m.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if err := health(); err != nil {

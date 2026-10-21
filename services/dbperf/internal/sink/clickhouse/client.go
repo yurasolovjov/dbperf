@@ -18,9 +18,9 @@ import (
 // Open connects to ClickHouse with the native protocol and LZ4 compression.
 func Open(ctx context.Context, cfg config.ClickHouse) (driver.Conn, error) {
 	conn, err := ch.Open(&ch.Options{
-		Addr: cfg.Addrs,
-		Auth: ch.Auth{Database: cfg.Database, Username: cfg.User, Password: cfg.Password},
-		Compression: &ch.Compression{Method: ch.CompressionLZ4},
+		Addr:         cfg.Addrs,
+		Auth:         ch.Auth{Database: cfg.Database, Username: cfg.User, Password: cfg.Password},
+		Compression:  &ch.Compression{Method: ch.CompressionLZ4},
 		DialTimeout:  cfg.DialTimeout,
 		MaxOpenConns: cfg.MaxOpenConns,
 		MaxIdleConns: cfg.MaxOpenConns,

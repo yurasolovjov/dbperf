@@ -30,13 +30,13 @@ type Loop struct {
 	metrics Metrics
 	log     *slog.Logger
 
-	conn     *pgconn.PgConn
-	version  int
-	sql      string
-	seen     *hashLRU
-	backoff  time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
+	conn    *pgconn.PgConn
+	version int
+	sql     string
+	seen    *hashLRU
+	backoff time.Duration
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 func newLoop(t registry.Target, cfg config.Scraper, emit Emitter, status *registry.StatusStore, m Metrics, log *slog.Logger) *Loop {

@@ -88,7 +88,7 @@ func (s *Service) TimeSeries(ctx context.Context, req TimeSeriesRequest) (*TimeS
 		return nil, fmt.Errorf("activity rows: %w", err)
 	}
 
-	buckets := al.buckets()
+	buckets := withSamples(al.buckets(), samples)
 	index := make(map[time.Time]int, len(buckets))
 	for i, b := range buckets {
 		index[b] = i
@@ -187,7 +187,7 @@ func (s *Service) Totals(ctx context.Context, req TotalsRequest) (*TotalsResult,
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	buckets := al.buckets()
+	buckets := withSamples(al.buckets(), samples)
 	res := &TotalsResult{Step: al.step, Timestamps: buckets, Values: make([]float64, len(buckets))}
 	var sumN, sumS uint64
 	for i, b := range buckets {
@@ -472,6 +472,18 @@ func (s *Service) shortTexts(ctx context.Context, targetID uint32, dim Dimension
 		out[k] = v
 	}
 	return out, rows.Err()
+}
+
+// withSamples drops buckets without a single snapshot: a gap in collection is
+// shown as a missing point, not as zero activity.
+func withSamples(buckets []time.Time, samples map[time.Time]uint64) []time.Time {
+	out := buckets[:0:0]
+	for _, b := range buckets {
+		if samples[b] > 0 {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 func (s *Service) points(requested int) int {

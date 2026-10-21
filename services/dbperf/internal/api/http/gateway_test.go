@@ -1,0 +1,97 @@
+package http
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	dbperfv1 "github.com/yurasolovjov/dbperf/services/dbperf/gen/dbperf/v1"
+)
+
+type fakeTargets struct {
+	dbperfv1.UnimplementedTargetServiceServer
+	gotFilter string
+}
+
+func (f *fakeTargets) ListTargets(_ context.Context, r *dbperfv1.ListTargetsRequest) (*dbperfv1.ListTargetsResponse, error) {
+	f.gotFilter = r.GetNameFilter()
+	return &dbperfv1.ListTargetsResponse{Targets: []*dbperfv1.Target{{TargetId: 7, Name: "pg", IntervalSec: 10, Enabled: true}}}, nil
+}
+
+func (f *fakeTargets) GetTargetStatus(context.Context, *dbperfv1.GetTargetStatusRequest) (*dbperfv1.TargetStatus, error) {
+	return nil, status.Error(codes.NotFound, "no such target")
+}
+
+type fakeActivity struct {
+	dbperfv1.UnimplementedActivityServiceServer
+	got *dbperfv1.ActivityTimeSeriesRequest
+}
+
+func (f *fakeActivity) GetActivityTimeSeries(_ context.Context, r *dbperfv1.ActivityTimeSeriesRequest) (*dbperfv1.ActivityTimeSeriesResponse, error) {
+	f.got = r
+	return &dbperfv1.ActivityTimeSeriesResponse{StepSeconds: 10, Level: "raw", Timestamps: []int64{1, 2}, Totals: []float64{0.5, 1}}, nil
+}
+
+func newMux(t *dbperfv1.TargetServiceServer, a *dbperfv1.ActivityServiceServer) *http.ServeMux {
+	mux := http.NewServeMux()
+	New(*t, *a, 4, slog.Default()).Mount(mux)
+	return mux
+}
+
+func TestListTargetsJSON(t *testing.T) {
+	ft := &fakeTargets{}
+	var ts dbperfv1.TargetServiceServer = ft
+	var as dbperfv1.ActivityServiceServer = &fakeActivity{}
+	mux := newMux(&ts, &as)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/targets/list", strings.NewReader(`{"nameFilter":"p"}`)))
+	if rr.Code != 200 || ft.gotFilter != "p" {
+		t.Fatalf("code %d filter %q body %s", rr.Code, ft.gotFilter, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"targetId":7`) || !strings.Contains(rr.Body.String(), `"nextPageToken":""`) {
+		t.Fatalf("body %s", rr.Body.String())
+	}
+}
+
+func TestTimeSeriesDecodesEnumsAndInt64(t *testing.T) {
+	fa := &fakeActivity{}
+	var ts dbperfv1.TargetServiceServer = &fakeTargets{}
+	var as dbperfv1.ActivityServiceServer = fa
+	mux := newMux(&ts, &as)
+	rr := httptest.NewRecorder()
+	body := `{"targetId":2,"range":{"startUnix":"1700000000","endUnix":1700003600},"stepSeconds":10,
+	          "slicing":{"dimension":"WAIT_EVENT_TYPE","limit":5},"filters":[{"dimension":"DATNAME","values":["shop"]}],"excludeSelf":true}`
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/activity/timeseries", strings.NewReader(body)))
+	if rr.Code != 200 {
+		t.Fatalf("code %d body %s", rr.Code, rr.Body.String())
+	}
+	if fa.got.GetRange().GetStartUnix() != 1700000000 || fa.got.GetRange().GetEndUnix() != 1700003600 ||
+		fa.got.GetSlicing().GetDimension() != dbperfv1.Dimension_WAIT_EVENT_TYPE || len(fa.got.GetFilters()) != 1 || !fa.got.GetExcludeSelf() {
+		t.Fatalf("decoded %+v", fa.got)
+	}
+	if !strings.Contains(rr.Body.String(), `"timestamps":["1","2"]`) {
+		t.Fatalf("body %s", rr.Body.String())
+	}
+}
+
+func TestErrorsMapToHTTP(t *testing.T) {
+	var ts dbperfv1.TargetServiceServer = &fakeTargets{}
+	var as dbperfv1.ActivityServiceServer = &fakeActivity{}
+	mux := newMux(&ts, &as)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/targets/status", strings.NewReader(`{"targetId":1}`)))
+	if rr.Code != 404 || !strings.Contains(rr.Body.String(), "no such target") {
+		t.Fatalf("code %d body %s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/targets/list", strings.NewReader(`{bad json`)))
+	if rr.Code != 400 {
+		t.Fatalf("code %d", rr.Code)
+	}
+}

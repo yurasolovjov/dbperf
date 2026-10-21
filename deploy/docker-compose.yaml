@@ -1,6 +1,6 @@
-# Test bench: PostgreSQL 16 with pgbench load, ClickHouse 24, dbperf (collector + API).
-# Usage: make -C services/dbperf up (builds the linux binary first, then docker compose up --build)
-# Lives in the repo root; the dbperf image is built from services/dbperf.
+# Test bench: PostgreSQL 16 with pgbench load, ClickHouse, dbperf (collector + API) and the UI behind nginx.
+# Usage: make up (repo root): builds the dbperf linux binary and the UI bundle, then docker compose up --build.
+# Images are built from services/dbperf and services/dbperf-ui.
 services:
   postgres:
     image: postgres:16
@@ -64,6 +64,15 @@ services:
       - ./dbperf/config.yaml:/etc/dbperf/config.yaml:ro
       - ./dbperf/targets.yaml:/etc/dbperf/targets.yaml:ro
     ports: ["9090:9090", "9091:9091"]
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ../services/dbperf-ui
+      dockerfile: Dockerfile.prebuilt
+    depends_on:
+      - dbperf
+    ports: ["8080:80"]
     restart: unless-stopped
 
 volumes:

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	apigrpc "github.com/yurasolovjov/dbperf/services/dbperf/internal/api/grpc"
+	apihttp "github.com/yurasolovjov/dbperf/services/dbperf/internal/api/http"
 	"github.com/yurasolovjov/dbperf/services/dbperf/internal/config"
 	"github.com/yurasolovjov/dbperf/services/dbperf/internal/query"
 	"github.com/yurasolovjov/dbperf/services/dbperf/internal/registry"
@@ -83,8 +85,9 @@ func run(cfg config.Config) error {
 		g.Go(func() error { return manager.Run(ctx) })
 		g.Go(func() error { return reportTargets(ctx, status, metrics) })
 	}
+	var mounts []func(*http.ServeMux)
 	if api {
-		srv := apigrpc.New(apigrpc.Deps{
+		deps := apigrpc.Deps{
 			Query:     query.New(conn, cfg.ClickHouse, cfg.API.MaxPoints, cfg.Scraper.QueryMaxLen),
 			Targets:   source,
 			Status:    status,
@@ -93,15 +96,18 @@ func run(cfg config.Config) error {
 			Log:       log.With("component", "grpc"),
 			MaxConc:   cfg.API.MaxConcurrentQueries,
 			MaxPoints: cfg.API.MaxPoints,
-		})
+		}
+		srv := apigrpc.New(deps)
 		g.Go(func() error { return srv.Run(ctx, cfg.API.GRPCAddr) })
+		gateway := apihttp.New(apigrpc.NewTargetServer(deps), apigrpc.NewActivityServer(deps), cfg.API.MaxConcurrentQueries, log.With("component", "http-api"))
+		mounts = append(mounts, gateway.Mount)
 	}
 	g.Go(func() error {
 		return telemetry.ServeHTTP(ctx, cfg.API.HTTPAddr, metrics, func() error {
 			pctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			return conn.Ping(pctx)
-		}, log.With("component", "http"))
+		}, log.With("component", "http"), mounts...)
 	})
 	err = g.Wait()
 	log.Info("stopped")

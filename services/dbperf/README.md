@@ -18,10 +18,10 @@
 ## Запуск стенда
 
 ```bash
-make up        # PostgreSQL 16 + pgbench, ClickHouse 25.8, dbperf (collector + api); бинарник собирается на хосте
+make up        # из корня репозитория: PostgreSQL 16 + pgbench, ClickHouse 25.8, dbperf, ui; бинарник и бандл собираются на хосте
 ```
 
-Порты: gRPC `9090`, метрики и `/healthz` `9091`, ClickHouse `9000`/`8123`, PostgreSQL `5432`.
+Порты: gRPC `9090`, JSON-шлюз, метрики и `/healthz` `9091`, фронтенд `8080`, ClickHouse `9000`/`8123`, PostgreSQL `5432`.
 
 Проверка данных:
 
@@ -43,6 +43,14 @@ grpcurl -plaintext -d "{\"target_id\":2,\"range\":{\"start_unix\":$((NOW-900)),\
 grpcurl -plaintext -d "{\"target_id\":2,\"range\":{\"start_unix\":$((NOW-900)),\"end_unix\":$NOW},
   \"slicing\":{\"dimension\":\"QUERY\",\"limit\":25},\"sub_slicing\":{\"dimension\":\"WAIT_EVENT_TYPE\",\"limit\":10}}" \
   localhost:9090 dbperf.v1.ActivityService/GetActivityTop
+```
+
+JSON-шлюз (`internal/api/http`) отдаёт те же методы по HTTP для фронтенда
+[services/dbperf-ui](../dbperf-ui/README.md):
+
+```bash
+curl -s -X POST localhost:9091/api/v1/activity/top -H 'Content-Type: application/json' \
+  -d '{"targetId":2,"range":{"startUnix":1792587000,"endUnix":1792587900},"slicing":{"dimension":"QUERY","limit":5}}'
 ```
 
 ## Локальная разработка

@@ -5,10 +5,11 @@ import "fmt"
 // activitySQL returns the snapshot query for a server version. Only active
 // backends are returned, the scraper's own backend is excluded by pid.
 // Columns (text format):
-//  0 pid, 1 leader_pid, 2 backend_type, 3 datname, 4 usename, 5 application_name,
-//  6 client_addr, 7 state, 8 wait_event_type, 9 wait_event,
-//  10 backend_start, 11 xact_start, 12 query_start, 13 state_change (epoch seconds),
-//  14 query_id, 15 query
+//
+//	0 pid, 1 leader_pid, 2 backend_type, 3 datname, 4 usename, 5 application_name,
+//	6 client_addr, 7 state, 8 wait_event_type, 9 wait_event,
+//	10 backend_start, 11 xact_start, 12 query_start, 13 state_change (epoch seconds),
+//	14 query_id, 15 query
 func activitySQL(serverVersionNum int, queryMaxLen int, ownPID uint32) string {
 	queryID := "query_id"
 	if serverVersionNum < 140000 {

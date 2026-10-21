@@ -1,0 +1,6 @@
+# Image from a bundle built on the host (npm run build); used by deploy/docker-compose.yaml
+# so the bench does not need network inside the build.
+FROM nginx:1.27-alpine
+COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY dist /usr/share/nginx/html
+EXPOSE 80
