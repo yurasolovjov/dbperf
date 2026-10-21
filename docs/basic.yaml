@@ -1,0 +1,1315 @@
+deploy_schema:
+  dynamic:
+    create_alignment_config: >
+      CREATE TABLE alignment_config (
+        alignment INTEGER NOT NULL,
+        sample_groups_table TEXT NOT NULL UNIQUE,
+        data_table TEXT NOT NULL UNIQUE,
+        query_range_limit_seconds INTEGER
+      );
+    insert_alignment_config: >
+      WITH dummy AS (
+        SELECT ?3
+      )
+      INSERT INTO alignment_config
+        (alignment, sample_groups_table, data_table, query_range_limit_seconds)
+        VALUES
+          (?1, 'sa_active_1s_sample_groups', 'sa_active_1s_data', 3600 * 2),
+          (?2, 'locks_1s_sample_groups', 'locks_1s_data', NULL),
+          (60, 'sa_active_1m_sample_groups', 'sa_active_1m_data', NULL);
+    update_properties_config: >
+      UPDATE properties_config
+      SET property_value_max_len = ?1,
+          property_short_value_max_len = ?2,
+          query_text_property_max_len = ?3;
+  static:
+    - >
+      PRAGMA temp_store = MEMORY;
+      PRAGMA foreign_keys = ON;
+      
+      CREATE TABLE pid_constants (
+        min_pid INTEGER NOT NULL DEFAULT -2147483648,
+        max_pid INTEGER NOT NULL DEFAULT +2147483647,
+        zero_pid_id INTEGER NOT NULL DEFAULT 0x7FFFFFFFFFFFFFF0,
+        null_pid_id INTEGER NOT NULL DEFAULT 0x7FFFFFFFFFFFFFFF,
+        malformed_pid_id INTEGER NOT NULL DEFAULT 0x7FFFFFFFFFFFFFFE,
+        null_oid INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO pid_constants DEFAULT VALUES;
+      
+      CREATE TABLE properties_config (
+        property_value_max_len INTEGER NOT NULL DEFAULT 256,
+        property_short_value_max_len INTEGER NOT NULL DEFAULT 64,
+        query_text_property_max_len INTEGER NOT NULL DEFAULT 4096
+      );
+      INSERT INTO properties_config DEFAULT VALUES;
+      
+      CREATE TABLE data_raw_input_template (
+        unix_time INTEGER,
+        pid INTEGER,
+        client_addr TEXT,
+        usename TEXT,
+        datid INTEGER,
+        datname TEXT,
+        state TEXT,
+        query TEXT,
+        wait_event_type TEXT,
+        wait_event TEXT,
+        xact_start INTEGER,
+        state_change INTEGER,
+        query_start INTEGER,
+        locktype TEXT,
+        mode TEXT,
+        relation INTEGER,
+        page INTEGER,
+        tuple INTEGER,
+        virtualxid TEXT,
+        transactionid TEXT,
+        classid INTEGER,
+        objid INTEGER,
+        objsubid INTEGER,
+        granted BOOLEAN,
+        time_marker_row BOOL
+      );
+      
+      CREATE TABLE data_raw_input AS
+      SELECT * FROM data_raw_input_template;
+      
+      CREATE VIEW sa_raw_input AS
+      SELECT DISTINCT unix_time,
+             pid,
+             client_addr,
+             usename,
+             datid,
+             datname,
+             state,
+             query,
+             wait_event_type,
+             wait_event,
+             time_marker_row
+      FROM data_raw_input;
+      
+      CREATE VIEW locks_raw_input AS
+      SELECT DISTINCT unix_time,
+             pid,
+             xact_start,
+             state_change,
+             query_start,
+             locktype,
+             mode,
+             datid,
+             datname,
+             client_addr,
+             usename,
+             state,
+             query,
+             wait_event_type,
+             wait_event,
+             relation,
+             page,
+             tuple,
+             virtualxid,
+             transactionid,
+             classid,
+             objid,
+             objsubid,
+             granted,
+             time_marker_row
+      FROM data_raw_input
+      WHERE locktype IS NOT NULL
+         OR time_marker_row = 1;
+      
+      CREATE VIEW sa_active_input_sessions_count AS
+      SELECT unix_time, 
+             CASE WHEN time_marker_row = 1 THEN 0 ELSE 1 END n_elements
+      FROM sa_raw_input
+      WHERE state IN ('active', 'fastpath function call')
+         OR time_marker_row = 1;
+      
+      CREATE VIEW locks_input_count AS
+      SELECT unix_time, 
+             CASE WHEN time_marker_row = 1 THEN 0 ELSE 1 END n_elements
+      FROM locks_raw_input;
+      
+      CREATE VIEW sa_input_sessions_data AS
+      WITH
+      consts AS (
+        SELECT min_pid,
+               max_pid,
+               zero_pid_id,
+               null_pid_id,
+               malformed_pid_id
+        FROM pid_constants
+        LIMIT 1
+      )
+      SELECT unix_time,
+             CASE
+               WHEN typeof(pid) = 'integer'
+                AND pid >= consts.min_pid
+                AND pid <= consts.max_pid
+                AND pid <> 0
+               THEN pid
+               WHEN typeof(pid) = 'integer'
+                AND pid = 0
+               THEN consts.zero_pid_id
+               WHEN pid IS NULL
+               THEN consts.null_pid_id
+               ELSE consts.malformed_pid_id
+             END process_id,
+             COALESCE(client_addr, '<unix_socket/internal>') client_addr,
+             COALESCE(usename, '<null>') usename,
+             COALESCE(datid, '<null>') datid,
+             COALESCE(datname, '<null>') datname,
+             COALESCE(state, '<null>') state,
+             COALESCE(query, '<null>') query,
+             CASE COALESCE(wait_event_type, wait_event) IS NULL AND state = 'active'
+               WHEN TRUE
+               THEN 'CPU'
+               ELSE COALESCE(wait_event_type, '<null>')
+             END wait_event_type,
+             CASE COALESCE(wait_event_type, wait_event) IS NULL AND state = 'active'
+               WHEN TRUE
+               THEN 'CPU'
+               ELSE COALESCE(wait_event, '<null>')
+             END wait_event
+      FROM sa_raw_input, consts
+      WHERE time_marker_row IS NULL;
+      
+      CREATE VIEW locks_input_data AS
+      WITH
+      consts AS (
+        SELECT min_pid,
+               max_pid,
+               zero_pid_id,
+               null_pid_id,
+               malformed_pid_id,
+               null_oid
+        FROM pid_constants
+        LIMIT 1
+      )
+      SELECT unix_time,
+             CASE
+               WHEN typeof(pid) = 'integer'
+                AND pid >= consts.min_pid
+                AND pid <= consts.max_pid
+                AND pid <> 0
+               THEN pid
+               WHEN typeof(pid) = 'integer'
+                AND pid = 0
+               THEN consts.zero_pid_id
+               WHEN pid IS NULL
+               THEN consts.null_pid_id
+               ELSE consts.malformed_pid_id
+             END process_id,
+             xact_start,
+             state_change,
+             query_start,
+             COALESCE(locktype, '<null>') locktype,
+             COALESCE(mode, '<null>') mode,
+             COALESCE(datid, consts.null_oid) datid,
+             datname,
+             COALESCE(client_addr, '<unix_socket/internal>') client_addr,
+             COALESCE(usename, '<null>') usename,
+             COALESCE(state, '<null>') state,
+             COALESCE(query, '<null>') query,
+             CASE COALESCE(wait_event_type, wait_event) IS NULL AND state = 'active'
+               WHEN TRUE
+               THEN 'CPU'
+               ELSE COALESCE(wait_event_type, '<null>')
+             END wait_event_type,
+             CASE COALESCE(wait_event_type, wait_event) IS NULL AND state = 'active'
+               WHEN TRUE
+               THEN 'CPU'
+               ELSE COALESCE(wait_event, '<null>')
+             END wait_event,
+             COALESCE(relation, consts.null_oid) relation,
+             COALESCE(page, consts.null_oid) page,
+             COALESCE(tuple, consts.null_oid) tuple,
+             virtualxid,
+             transactionid,
+             COALESCE(classid, consts.null_oid) classid,
+             COALESCE(objid, consts.null_oid) objid,
+             COALESCE(objsubid, consts.null_oid) objsubid,
+             granted
+      FROM locks_raw_input, consts
+      WHERE time_marker_row IS NULL;
+      
+      -----------------------------------------------------------
+      -- client_host --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_client_hosts (
+        client_host_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_addr TEXT NOT NULL UNIQUE,
+        client_addr_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_client_host_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT client_host_id id,
+               substr(client_addr, 1, cfg.max_len) short_addr,
+               CASE
+                 WHEN COALESCE(client_addr_overflow, FALSE)
+                   OR length(client_addr) > cfg.max_len
+                 THEN 'true'
+                 ELSE 'null'
+               END short_addr_overflow,
+               client_addr addr,
+               client_addr_overflow addr_overflow
+        FROM sa_client_hosts, cfg
+      )
+      SELECT id,
+             json_object(
+               'client_host.id', id,
+               'client_host.short_addr', short_addr,
+               'client_host.short_addr_overflow', json(short_addr_overflow)
+             ) short_properties,
+             json_object(
+               'client_host.id', id,
+               'client_host.addr', addr,
+               'client_host.addr_overflow', json(addr_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- usename --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_usenames (
+        usename_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usename TEXT NOT NULL UNIQUE,
+        usename_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_usename_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT usename_id id,
+               substr(usename, 1, cfg.max_len) short_name,
+               CASE
+                 WHEN COALESCE(usename_overflow, FALSE)
+                   OR length(usename) > cfg.max_len THEN 'true'
+                 ELSE 'null'
+               END short_name_overflow,
+               usename name,
+               usename_overflow name_overflow
+        FROM sa_usenames, cfg
+      )
+      SELECT id,
+             json_object(
+               'usename.id', id,
+               'usename.short_name', short_name,
+               'usename.short_name_overflow', json(short_name_overflow)
+             ) short_properties,
+             json_object(
+               'usename.id', id,
+               'usename.name', name,
+               'usename.name_overflow', json(name_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- datname --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_datnames (
+        datname_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        datid INTEGER,
+        datname TEXT NOT NULL UNIQUE,
+        datname_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_datname_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT datname_id id,
+               substr(datname, 1, cfg.max_len) short_name,
+               CASE 
+                 WHEN COALESCE(datname_overflow, FALSE)
+                   OR length(datname) > cfg.max_len THEN 'true'
+                 ELSE 'null'
+               END short_name_overflow,
+               datname name,
+               datname_overflow name_overflow
+        FROM sa_datnames, cfg
+      )
+      SELECT id,
+             json_object(
+               'datname.id', id,
+               'datname.short_name', short_name,
+               'datname.short_name_overflow', json(short_name_overflow)
+             ) short_properties,
+             json_object(
+               'datname.id', id,
+               'datname.name', name,
+               'datname.name_overflow', json(name_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- state --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_states (
+        state_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        state TEXT NOT NULL UNIQUE,
+        state_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_active_states AS
+      SELECT state_id
+      FROM sa_states
+      WHERE state IN ('active', 'fastpath function call');
+      
+      CREATE VIEW sa_states_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT state_id id,
+               substr(state, 1, cfg.max_len) short_name,
+               CASE
+                 WHEN COALESCE(state_overflow, FALSE)
+                  OR length(state) > cfg.max_len THEN 'true'
+                ELSE 'null'
+               END short_name_overflow,
+               state name,
+               state_overflow name_overflow
+        FROM sa_states, cfg
+      )
+      SELECT id,
+             json_object(
+               'state.id', id,
+               'state.short_name', short_name,
+               'state.short_name_overflow', json(short_name_overflow)
+             ) short_properties,
+             json_object(
+               'state.id', id,
+               'state.name', name,
+               'state.name_overflow', json(name_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- query --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_queries (
+        ki_query_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_text TEXT NOT NULL UNIQUE,
+        query_text_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_query_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT ki_query_id id,
+               ki_query_id,
+               substr(query_text, 1, cfg.max_len) short_text,
+               CASE
+                 WHEN COALESCE(query_text_overflow, FALSE)
+                   OR length(query_text) > cfg.max_len THEN 'true'
+                 ELSE 'null'
+               END short_text_overflow,
+               query_text text,
+               query_text_overflow text_overflow
+        FROM sa_queries, cfg
+      )
+      SELECT id,
+             json_object(
+               'query.id', id,
+               'query.ki_query_id', ki_query_id,
+               'query.short_text', short_text,
+               'query.short_text_overflow', json(short_text_overflow)
+             ) short_properties,
+             json_object(
+               'query.id', id,
+               'query.ki_query_id', ki_query_id,
+               'query.text', text,
+               'query.text_overflow', json(text_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- wait_event_type --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_wait_event_types (
+        wait_event_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wait_event_type TEXT NOT NULL UNIQUE,
+        wait_event_type_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_wait_event_type_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT wait_event_type_id id,
+               substr(wait_event_type, 1, cfg.max_len) short_name,
+               CASE
+                 WHEN COALESCE(wait_event_type_overflow, FALSE)
+                   OR length(wait_event_type) > cfg.max_len THEN 'true'
+                 ELSE 'null'
+               END short_name_overflow,
+               wait_event_type name,
+               wait_event_type_overflow name_overflow
+        FROM sa_wait_event_types, cfg
+      )
+      SELECT id,
+             json_object(
+               'wait_event_type.id', id,
+               'wait_event_type.short_name', short_name,
+               'wait_event_type.short_name_overflow', json(short_name_overflow)
+             ) short_properties,
+             json_object(
+               'wait_event_type.id', id,
+               'wait_event_type.name', name,
+               'wait_event_type.name_overflow', json(name_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- wait_event --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_wait_events (
+        wait_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wait_event TEXT NOT NULL UNIQUE,
+        wait_event_overflow BOOL,
+        last_used INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_wait_event_enrichment AS
+      WITH
+      cfg AS (
+        SELECT property_short_value_max_len max_len FROM properties_config LIMIT 1
+      ),
+      props AS (
+        SELECT wait_event_id id,
+               substr(wait_event, 1, cfg.max_len) short_name,
+               CASE
+                 WHEN COALESCE(wait_event_overflow, FALSE)
+                   OR length(wait_event) > cfg.max_len THEN 'true'
+                 ELSE 'null'
+               END short_name_overflow,
+               wait_event name,
+               wait_event_overflow name_overflow
+        FROM sa_wait_events, cfg
+      )
+      SELECT id,
+             json_object(
+               'wait_event.id', id,
+               'wait_event.short_name', short_name,
+               'wait_event.short_name_overflow', json(short_name_overflow)
+             ) short_properties,
+             json_object(
+               'wait_event.id', id,
+               'wait_event.name', name,
+               'wait_event.name_overflow', json(name_overflow)
+             ) properties
+      FROM props;
+      
+      -----------------------------------------------------------
+      -- mode --
+      -- Do not change modes order! --
+      -----------------------------------------------------------
+      
+      CREATE TABLE locks_modes (
+        mode_id INTEGER PRIMARY KEY,
+        mode TEXT NOT NULL UNIQUE
+      );
+      
+      INSERT INTO locks_modes(mode_id, mode) VALUES (1, 'AccessShareLock'),
+                                                    (2, 'RowShareLock'),
+                                                    (3, 'RowExclusiveLock'),
+                                                    (4, 'ShareUpdateExclusiveLock'),
+                                                    (5, 'ShareLock'),
+                                                    (6, 'ShareRowExclusiveLock'),
+                                                    (7, 'ExclusiveLock'),
+                                                    (8, 'AccessExclusiveLock');
+      
+      -----------------------------------------------------------
+      -- locktype --
+      -----------------------------------------------------------
+      
+      CREATE TABLE locks_locktypes (
+        locktype_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        locktype TEXT NOT NULL UNIQUE,
+        last_used INTEGER NOT NULL
+      );
+      
+      ----------------------------------------------------------
+      -- lock object --
+      ----------------------------------------------------------
+      
+      CREATE TABLE locks_objects (
+        object_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        datname_id INTEGER NOT NULL
+          REFERENCES sa_datnames(datname_id),
+        relation INTEGER,
+        page INTEGER,
+        tuple INTEGER,          
+        classid INTEGER,
+        objid INTEGER,
+        objsubid INTEGER,
+        last_used INTEGER NOT NULL,
+        UNIQUE(datname_id, relation, page, tuple, classid, objid, objsubid)
+      );
+      
+      CREATE VIEW locks_objects_extended AS
+      SELECT o.object_id,
+             o.datname_id,
+             d.datid,
+             o.relation,
+             o.page,
+             o.tuple,          
+             o.classid,
+             o.objid,
+             o.objsubid,
+             o.last_used
+      FROM locks_objects o
+      JOIN sa_datnames d ON o.datname_id = d.datname_id;
+      
+      -----------------------------------------------------------
+      -- service counters --
+      -----------------------------------------------------------
+      
+      CREATE TABLE service_counters (
+        n_merge_events INTEGER NOT NULL DEFAULT 0,
+        n_merged_samples INTEGER NOT NULL DEFAULT 0,
+        n_merged_sessions INTEGER NOT NULL DEFAULT 0,
+        n_merged_locks INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO service_counters DEFAULT VALUES;
+      
+      CREATE TABLE service_events (
+        depth_time_limit BOOL,
+        size_time_limit BOOL,
+        time_shrink_request INTEGER,
+        created_at INTEGER,     -- n_merged_samples service counter value
+        completed_at INTEGER    -- n_merged_samples service counter value
+      );
+      INSERT INTO service_events
+        (depth_time_limit, size_time_limit, time_shrink_request, created_at, completed_at)
+        VALUES (NULL, NULL, NULL, NULL, NULL);
+      
+      -----------------------------------------------------------
+      -- data tables --
+      -----------------------------------------------------------
+      
+      CREATE TABLE sa_active_1s_sample_groups (
+        unix_time INTEGER PRIMARY KEY,
+        n_samples INTEGER NOT NULL,
+        n_elements INTEGER NOT NULL
+      );
+      
+      CREATE TABLE sa_active_1s_data (
+        unix_time INTEGER NOT NULL
+          REFERENCES sa_active_1s_sample_groups(unix_time),
+        process_id INTEGER NOT NULL,
+        client_host_id INTEGER NOT NULL
+          REFERENCES sa_client_hosts(client_host_id),
+        usename_id INTEGER NOT NULL
+          REFERENCES sa_usenames(usename_id),
+        datname_id INTEGER NOT NULL
+          REFERENCES sa_datnames(datname_id),
+        state_id INTEGER NOT NULL
+          REFERENCES sa_states(state_id),
+        ki_query_id INTEGER NOT NULL
+          REFERENCES sa_queries(ki_query_id),
+        wait_event_type_id INTEGER NOT NULL
+          REFERENCES sa_wait_event_types(wait_event_type_id),
+        wait_event_id INTEGER NOT NULL
+          REFERENCES sa_wait_events(wait_event_id),
+        n_elements INTEGER NOT NULL,
+        UNIQUE (
+          unix_time,
+          process_id,
+          client_host_id,
+          usename_id,
+          datname_id,
+          state_id,
+          ki_query_id,
+          wait_event_type_id,
+          wait_event_id
+        )
+      );
+      
+      CREATE TABLE locks_1s_sample_groups (
+        unix_time INTEGER PRIMARY KEY,
+        n_samples INTEGER NOT NULL,
+        n_elements INTEGER NOT NULL
+      );
+      
+      CREATE TABLE locks_1s_data (
+        unix_time INTEGER NOT NULL
+          REFERENCES locks_1s_sample_groups(unix_time),
+        process_id INTEGER NOT NULL,
+        xact_start INTEGER,
+        state_change INTEGER,
+        query_start INTEGER,
+        locktype_id INTEGER NOT NULL
+          REFERENCES locks_locktypes(locktype_id),
+        mode_id INTEGER NOT NULL
+          REFERENCES locks_modes(mode_id),
+        object_id INTEGER NOT NULL
+          REFERENCES locks_objects(object_id),
+        usename_id INTEGER NOT NULL
+          REFERENCES sa_usenames(usename_id),
+        client_host_id INTEGER NOT NULL
+          REFERENCES sa_client_hosts(client_host_id),
+        state_id INTEGER NOT NULL
+          REFERENCES sa_states(state_id),
+        wait_event_type_id INTEGER NOT NULL
+          REFERENCES sa_wait_event_types(wait_event_type_id),
+        wait_event_id INTEGER NOT NULL
+          REFERENCES sa_wait_events(wait_event_id),
+        ki_query_id INTEGER NOT NULL
+          REFERENCES sa_queries(ki_query_id),
+        virtualxid TEXT,
+        transactionid TEXT,
+        granted BOOLEAN,
+        n_elements INTEGER NOT NULL,
+        UNIQUE (
+          unix_time,
+          process_id,
+          xact_start,
+          state_change,
+          query_start,
+          locktype_id,
+          mode_id,
+          object_id,
+          usename_id,
+          client_host_id,
+          state_id,
+          wait_event_type_id,
+          wait_event_id,
+          ki_query_id, 
+          virtualxid,
+          transactionid,
+          granted
+        )
+      );
+      
+      CREATE TABLE locks_1s_metrics (
+        unix_time INTEGER PRIMARY KEY,
+        n_blocking INTEGER NOT NULL,
+        n_blocked INTEGER NOT NULL
+      );
+      
+      CREATE TABLE locks_1s_start_ts (
+        id INTEGER UNIQUE,
+        unix_time INTEGER NOT NULL
+      );
+      
+      CREATE VIEW sa_max_merged_sample_time AS
+        SELECT MAX(t.unix_time) unix_time FROM sa_active_1s_sample_groups t;
+      
+      CREATE TABLE sa_active_1m_sample_groups (
+        unix_time INTEGER PRIMARY KEY,
+        n_samples INTEGER NOT NULL,
+        n_elements INTEGER NOT NULL
+      );
+      
+      CREATE TABLE sa_active_1m_data (
+        unix_time INTEGER NOT NULL
+          REFERENCES sa_active_1m_sample_groups(unix_time),
+        process_id INTEGER NOT NULL,
+        client_host_id INTEGER NOT NULL
+          REFERENCES sa_client_hosts(client_host_id),
+        usename_id INTEGER NOT NULL
+          REFERENCES sa_usenames(usename_id),
+        datname_id INTEGER NOT NULL
+          REFERENCES sa_datnames(datname_id),
+        ki_query_id INTEGER NOT NULL
+          REFERENCES sa_queries(ki_query_id),
+        wait_event_type_id INTEGER NOT NULL
+          REFERENCES sa_wait_event_types(wait_event_type_id),
+        wait_event_id INTEGER NOT NULL
+          REFERENCES sa_wait_events(wait_event_id),
+        n_elements INTEGER NOT NULL,
+        UNIQUE (
+          unix_time, process_id, client_host_id, usename_id, datname_id,
+          ki_query_id, wait_event_type_id, wait_event_id
+        )
+      );
+      
+      -----------------------------------------------------------
+      -- storage statistics data --
+      -----------------------------------------------------------
+      
+      CREATE VIEW storage_stats_current AS
+      SELECT
+        strftime('%s', 'now') unix_time,
+        COALESCE((SELECT MAX(n_merge_events) FROM service_counters), 0) n_merge_events,
+        COALESCE((SELECT MAX(n_merged_samples) FROM service_counters), 0) n_merged_samples,
+        COALESCE((SELECT MAX(n_merged_sessions) FROM service_counters), 0) n_merged_sessions,
+        COALESCE((SELECT MAX(n_merged_locks) FROM service_counters), 0) n_merged_locks,
+        COALESCE((SELECT COUNT(*) FROM sa_client_hosts), 0) n_client_hosts,
+        COALESCE((SELECT COUNT(*) FROM sa_usenames), 0) n_usenames,
+        COALESCE((SELECT COUNT(*) FROM sa_datnames), 0) n_datnames,
+        COALESCE((SELECT COUNT(*) FROM sa_states), 0) n_states,
+        COALESCE((SELECT COUNT(*) FROM sa_queries), 0) n_queries,
+        COALESCE((SELECT COUNT(*) FROM sa_wait_event_types), 0) n_wait_event_types,
+        COALESCE((SELECT COUNT(*) FROM sa_wait_events), 0) n_wait_events,
+        COALESCE((SELECT COUNT(*) FROM locks_locktypes), 0) n_locktypes,
+        COALESCE((SELECT COUNT(*) FROM locks_objects), 0) n_lock_objects,
+        COALESCE((SELECT COUNT(*) FROM sa_active_1s_sample_groups), 0) n_sa_active_1s_sample_groups,
+        COALESCE((SELECT COUNT(*) FROM sa_active_1s_data), 0) n_sa_active_1s_data,
+        COALESCE((SELECT COUNT(*) FROM locks_1s_sample_groups), 0) n_locks_1s_sample_groups,
+        COALESCE((SELECT COUNT(*) FROM locks_1s_data), 0) n_locks_1s_data,
+        COALESCE((SELECT COUNT(*) FROM sa_active_1m_sample_groups), 0) n_sa_active_1m_sample_groups,
+        COALESCE((SELECT COUNT(*) FROM sa_active_1m_data), 0) n_sa_active_1m_data,
+        COALESCE((SELECT MAX(unix_time) - MIN(unix_time) FROM sa_active_1s_sample_groups WHERE unix_time > 0), 0) n_1s_depth,
+        COALESCE((SELECT MAX(unix_time) - MIN(unix_time) FROM sa_active_1m_sample_groups WHERE unix_time > 0), 0) n_1m_depth,
+        COALESCE((page_count * page_size), 0) size_bytes,
+        COALESCE((freelist_count * page_size), 0) freelist_bytes
+      FROM (
+        SELECT
+          (SELECT * FROM pragma_page_count) page_count,
+          (SELECT * FROM pragma_freelist_count) freelist_count,
+          (SELECT * FROM pragma_page_size) page_size
+      ) pragmas;
+maintenance:
+  insert_raw_data: >
+    WITH dummy AS (
+      SELECT ?1
+    )
+    INSERT INTO data_raw_input (unix_time, time_marker_row, pid, client_addr, usename, datid, 
+    datname, state, query, wait_event_type, wait_event, xact_start, state_change, query_start, locktype, mode, relation, 
+    page, tuple, virtualxid, transactionid, classid, objid, objsubid, granted)
+    VALUES (?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+    ?24, ?25, ?26);
+  update_service_events: >
+    WITH depth_shrink_req AS (
+      SELECT unix_time
+      FROM (
+        SELECT unix_time
+        FROM sa_active_1m_sample_groups
+        WHERE (SELECT MAX(unix_time) FROM sa_active_1m_sample_groups) - unix_time >= ?2
+        ORDER BY unix_time
+        LIMIT 1 OFFSET 1
+      ) t
+    ),
+    size_shrink_req AS (
+      WITH pragmas AS (
+        SELECT (SELECT * FROM pragma_page_count) page_count,
+               (SELECT * FROM pragma_freelist_count) freelist_count,
+               (SELECT * FROM pragma_page_size) page_size
+      )
+      SELECT unix_time
+      FROM (
+        SELECT unix_time
+        FROM sa_active_1m_sample_groups
+        ORDER BY unix_time
+        LIMIT 1 OFFSET 1
+      ) t
+      WHERE (SELECT (page_count - freelist_count) * page_size FROM pragmas) > ?3
+    )
+    UPDATE service_events
+    SET depth_time_limit = (SELECT unix_time FROM depth_shrink_req),
+        size_time_limit = (SELECT unix_time FROM size_shrink_req),
+        time_shrink_request = (
+          SELECT MAX(unix_time)
+          FROM (
+            SELECT unix_time FROM depth_shrink_req
+            UNION ALL SELECT unix_time FROM size_shrink_req
+          ) t
+        ),
+        created_at = (SELECT MAX(n_merged_samples) FROM service_counters),
+        completed_at = NULL
+    WHERE (
+      (SELECT MAX(n_merged_samples) FROM service_counters) - COALESCE(completed_at, 0) >= ?1
+    ) OR (
+      completed_at IS NOT NULL AND size_time_limit IS NOT NULL
+    );
+  size_time_limit: >
+    SELECT COALESCE(size_time_limit, 0) FROM service_events;
+  clean: >
+    DELETE FROM sa_active_1s_data
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM locks_1s_data
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM locks_1s_metrics
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_active_1m_data
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM locks_locktypes
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+
+    DELETE FROM locks_objects
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_client_hosts
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_usenames
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_datnames
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_states
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_queries
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_wait_event_types
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_wait_events
+    WHERE last_used < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_active_1s_sample_groups
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM locks_1s_sample_groups
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    DELETE FROM sa_active_1m_sample_groups
+    WHERE unix_time < (
+      SELECT MAX(time_shrink_request) FROM service_events
+      WHERE completed_at IS NULL
+    );
+    
+    UPDATE service_events SET
+      completed_at = (SELECT MAX(n_merged_samples) FROM service_counters)
+    WHERE completed_at IS NULL;
+  update_alignment_config: >
+    UPDATE alignment_config 
+    SET alignment = ?1
+    WHERE sample_groups_table = ?2
+      AND (?3 == ?3);
+data:
+  size_bytes: >
+    SELECT page_count,
+    	   page_size
+    FROM (SELECT (SELECT *
+                  FROM pragma_page_count) page_count,
+                 (SELECT *
+                  FROM pragma_page_size) page_size
+    ) pragmas;
+  all_tables: >
+    SELECT name FROM sqlite_schema
+    WHERE type IN ('table','view')
+    AND name NOT LIKE 'sqlite_%'
+    ORDER BY 1;
+  check_timestamp_existence: >
+    SELECT EXISTS(SELECT 1 
+                  FROM locks_1s_data d
+                  JOIN locks_objects_extended e ON (d.object_id = e.object_id)
+                  WHERE unix_time = ?1
+                  AND ({{.Filter}})
+    );
+  select_available_alignments: >
+    WITH dummy AS (
+          SELECT ?2
+    )
+    SELECT alignment
+    FROM alignment_config
+    WHERE sample_groups_table LIKE ?1;
+  select_time_alignment_config: >
+    WITH available_alignments AS (
+      SELECT sample_groups_table,
+             data_table,
+             query_range_limit_seconds,
+             avail_alignment,
+             agreed_alignment,
+             (?1 / agreed_alignment) -- floor
+             * agreed_alignment start_time,
+             (?2 / agreed_alignment + (?2 % agreed_alignment > 0)) -- ceil
+             * agreed_alignment end_time
+      FROM (
+        SELECT cfg.sample_groups_table,
+               cfg.data_table,
+               cfg.query_range_limit_seconds,
+               cfg.alignment avail_alignment,
+               CAST(MAX(ROUND(req.max_req_alignment / cfg.alignment), 1.0) AS INTEGER) * cfg.alignment agreed_alignment
+        FROM (
+          SELECT MAX(requested.alignment) max_req_alignment
+          FROM (
+            SELECT CAST(j.value AS REAL) alignment
+            FROM json_each(?4) j
+            UNION ALL
+            SELECT ?5 alignment
+          ) requested
+        ) req
+        CROSS JOIN alignment_config cfg
+      ) t
+    ),
+    dummy AS (
+      SELECT ?7
+    )
+    SELECT start_time,
+           adjusted_end_time end_time,
+           agreed_alignment alignment,
+           sample_groups_table,
+           data_table
+    FROM (
+      SELECT sample_groups_table,
+             data_table,
+             query_range_limit_seconds,
+             avail_alignment,
+             agreed_alignment,
+             start_time,
+             adjusted_end_time,
+             CASE
+               WHEN range < 0 THEN 0
+               ELSE range
+             END range,
+             n_points,
+             MAX(n_points) OVER() max_n_points
+      FROM (
+        SELECT sample_groups_table,
+               data_table,
+               query_range_limit_seconds,
+               avail_alignment,
+               agreed_alignment,
+               start_time,
+               adjusted_end_time,
+               (adjusted_end_time - start_time) range,
+               (adjusted_end_time - start_time) / agreed_alignment + 1 n_points
+        FROM (
+          SELECT sample_groups_table,
+                 data_table,
+                 query_range_limit_seconds,
+                 avail_alignment,
+                 agreed_alignment,
+                 start_time,
+                 CASE
+                   WHEN mmst.unix_time IS NOT NULL
+                   THEN MIN(end_time, mmst.unix_time / agreed_alignment * agreed_alignment)
+                   ELSE end_time
+                 END adjusted_end_time
+          FROM available_alignments
+          CROSS JOIN sa_max_merged_sample_time mmst
+          WHERE sample_groups_table LIKE ?6
+        ) with_adjusted_end_time
+      ) with_n_points
+      WHERE (range <= query_range_limit_seconds OR query_range_limit_seconds IS NULL)
+        AND n_points <= ?3
+    ) with_max_n_points
+    WHERE n_points = max_n_points
+    ORDER BY avail_alignment DESC
+    LIMIT 1;
+  select_slice_top_top: >
+    WITH bounded_totals AS (
+      SELECT SUM(t.n_samples) n_samples,
+             SUM(t.n_elements) n_elements
+      FROM {{.SampleGroupsTable}} t
+      WHERE t.unix_time >= ?2
+      AND t.unix_time < (?3 + ?1)
+    ),
+    filtered_data AS (
+      SELECT t.{{.Slice1Column}} slice1,
+             t.{{.Slice2Column}} slice2,
+             t.n_elements
+      FROM {{.DataTable}} t
+      WHERE t.unix_time >= ?2
+        AND t.unix_time < (?3 + ?1)
+        AND ({{.DataTableWhereClauseExtra}})
+    ),
+    top_slices_1 AS (
+      SELECT slice1,
+             SUM(n_elements) slice1_sessions
+      FROM filtered_data
+      GROUP BY 1
+      ORDER BY 2 DESC, 1
+      LIMIT ?4
+    ),
+    top_slices_2 AS (
+      SELECT slice2,
+             SUM(n_elements) slice2_weight
+      FROM filtered_data
+      GROUP BY 1
+      ORDER BY 2 DESC, 1
+      LIMIT ?5
+    ),
+    slice_matrix AS (
+      SELECT ts1.slice1,
+             ts1.slice1_sessions slice1_weight,
+             ts2ext.slice2,
+             ts2ext.slice2_weight,
+             CASE
+               WHEN ts2ext.slice2 IS NULL /* SLICE1 SUMMARY */
+               THEN ts1.slice1_sessions
+             ELSE NULL
+             END slice1_summary
+      FROM top_slices_1 ts1
+      JOIN (
+        SELECT ts2.slice2,
+               ts2.slice2_weight
+        FROM top_slices_2 ts2
+        UNION ALL
+        SELECT 0 /* REMAINDER SLICE */ slice2, -1 slice2_weight
+        UNION ALL
+        SELECT NULL /* SLICE1 SUMMARY */ slice2, NULL slice2_weight
+      ) ts2ext
+    ),
+    slice_aggregates AS (
+      SELECT d.slice1,
+             COALESCE(ts2.slice2, 0 /* REMAINDER SLICE */) slice2,
+             SUM(n_elements) n_elements
+      FROM (
+        SELECT slice1,
+               slice2,
+               SUM(n_elements) n_elements
+        FROM filtered_data
+        GROUP BY 1, 2
+      ) d
+      LEFT JOIN top_slices_2 ts2 ON d.slice2 = ts2.slice2
+      GROUP BY d.slice1, ts2.slice2
+    ),
+    dummy AS (
+      SELECT ?6
+    )
+    SELECT res.slice1,
+           res.slice1_weight,
+           res.slice2,
+           res.slice2_weight,
+           ROUND(CAST(res.n_elements AS REAL) / bt.n_samples, 3) aas_value,
+           ROUND(CAST(res.n_elements AS REAL) / bt.n_elements * 100, 3) ptta_value
+    FROM (
+      SELECT sm.slice1,
+             sm.slice1_weight,
+             sm.slice2,
+             sm.slice2_weight,
+             COALESCE(sm.slice1_summary, sa.n_elements, 0) n_elements
+      FROM slice_matrix sm
+      LEFT JOIN slice_aggregates sa ON (sm.slice1 = sa.slice1 AND sm.slice2 = sa.slice2)
+    ) res
+    JOIN bounded_totals bt
+    ORDER BY {{.Slice1OrderBy}}, {{.Slice2OrderBy}};
+  select_slice_time_top: >
+    WITH bounded_totals AS (
+      SELECT t.unix_time/?1*?1 unix_time,
+             SUM(t.n_samples) n_samples
+      FROM {{.SampleGroupsTable}} t
+      WHERE t.unix_time >= ?2
+        AND t.unix_time < (?3 + ?1)
+      GROUP BY 1
+    ),
+    filtered_data AS (
+      SELECT t.unix_time,
+             t.{{.Slice2Column}} slice2,
+             t.n_elements
+      FROM {{.DataTable}} t
+      WHERE t.unix_time >= ?2
+        AND t.unix_time < (?3 + ?1)
+        AND ({{.DataTableWhereClauseExtra}})
+    ),
+    top_slices AS (
+      SELECT slice2,  
+             SUM(n_elements) slice2_weight
+      FROM filtered_data
+      GROUP BY 1
+      ORDER BY 2 DESC, 1
+      LIMIT ?4
+    ),
+    aligned_data AS (
+      SELECT unix_time/?1*?1 unix_time,
+             slice2,
+             SUM(n_elements) n_elements
+      FROM filtered_data
+      GROUP BY 1, 2
+    ),
+    non_empty_aggregates AS (
+      SELECT d.unix_time unix_time,
+             COALESCE(ts.slice2, 0 /* REMAINDER SLICE */) slice2,
+             SUM(d.n_elements) n_elements
+      FROM aligned_data d
+      LEFT JOIN top_slices ts ON d.slice2 = ts.slice2
+      GROUP BY d.unix_time, ts.slice2
+    ),
+    dummy AS (
+      SELECT ?5
+    )
+    SELECT unix_time,
+           slice2,
+           n_elements,
+           n_tp_samples,
+           n_tp_sessions,
+           n_slice_sessions,
+           n_total_sessions,
+           n_total_samples,
+           CASE
+             WHEN unix_time IS NOT NULL AND slice2 IS NOT NULL
+             THEN ROUND(CAST(n_elements AS REAL) / n_tp_samples, 3)
+             WHEN unix_time IS NOT NULL AND slice2 IS NULL
+             THEN ROUND(CAST(n_tp_sessions AS REAL) / n_tp_samples, 3)
+             WHEN unix_time IS NULL AND slice2 IS NOT NULL
+             THEN CASE
+                    WHEN n_total_samples <> 0
+                    THEN ROUND(CAST(n_slice_sessions AS REAL) / n_total_samples, 3)
+                    ELSE CAST(0 AS REAL)
+                  END
+             ELSE CASE
+                    WHEN n_total_samples <> 0
+                    THEN ROUND(CAST(n_total_sessions AS REAL) / n_total_samples, 3)
+                    ELSE CAST(0 AS REAL)
+                  END
+           END avg_sessions
+    FROM (
+      SELECT tps.unix_time,
+             sls.slice2,
+             sls.slice2_weight,
+             COALESCE(ags.n_elements, 0) n_elements,
+             tps.n_tp_samples,
+             SUM(COALESCE(ags.n_elements, 0)) OVER (
+               PARTITION BY tps.unix_time ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_tp_sessions,
+             SUM(COALESCE(ags.n_elements, 0)) OVER (
+               PARTITION BY sls.slice2 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_slice_sessions,
+             SUM(COALESCE(ags.n_elements, 0)) OVER (
+               ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_sessions,
+             COALESCE(MAX(tps.n_total_samples) OVER (
+               ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) n_total_samples
+        FROM (
+          SELECT unix_time,
+                 n_samples n_tp_samples,
+                 SUM(n_samples) OVER (
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_samples
+          FROM bounded_totals
+          UNION ALL
+          -- 'slice summary' and 'total summary' preform
+          SELECT NULL unix_time,
+                 NULL n_tp_samples,
+                 NULL n_total_samples
+        ) tps
+        JOIN (
+          SELECT slice2,
+                 slice2_weight
+          FROM top_slices
+          UNION ALL
+          SELECT 0 /* REMAINDER SLICE */ slice2, 
+          -1 slice2_weight
+          UNION ALL
+          -- 'time point summary' and 'total summary' preform
+          SELECT NULL slice2,
+                 NULL slice2_weight
+      ) sls
+      LEFT JOIN non_empty_aggregates ags
+      ON (tps.unix_time = ags.unix_time AND sls.slice2 = ags.slice2)
+    ) t
+    ORDER BY t.unix_time, {{.Slice2OrderBy}};
+  select_slice_time_totals: >
+    WITH bounded_totals AS (
+      SELECT t.unix_time/?1*?1 unix_time,
+             SUM(t.n_samples) n_samples,
+             SUM(t.n_elements) n_elements
+      FROM {{.SampleGroupsTable}} t
+      WHERE t.unix_time >= ?2
+        AND t.unix_time < (?3 + ?1)
+      GROUP BY 1
+    ),
+    dummy AS (
+      SELECT ?4
+    )
+    SELECT unix_time,
+           ROUND(CAST(n_elements AS REAL) / n_samples, 3) aas_value,
+           ROUND(CAST(n_total_sessions AS REAL) / n_total_samples, 3) avg_aas_value
+    FROM (
+        SELECT unix_time,
+               n_samples,
+               n_elements,
+               SUM(n_samples) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_samples,
+               SUM(n_elements) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_sessions
+        FROM bounded_totals bt
+    );
+  ki_pi_stats: >
+    SELECT json_object({{.Columns}}) FROM storage_stats_current;
+  ki_pi_columns:
+    - n_merge_events
+    - n_merged_samples
+    - n_merged_sessions
+    - n_merged_locks
+    - n_client_hosts
+    - n_usenames
+    - n_datnames
+    - n_states
+    - n_queries
+    - n_wait_event_types
+    - n_wait_events
+    - n_locktypes
+    - n_lock_objects
+    - n_sa_active_1s_sample_groups
+    - n_sa_active_1s_data
+    - n_locks_1s_sample_groups
+    - n_locks_1s_data
+    - n_sa_active_1m_sample_groups
+    - n_sa_active_1m_data
+    - n_1s_depth
+    - n_1m_depth
+    - size_bytes
+    - freelist_bytes

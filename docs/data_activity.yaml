@@ -1,0 +1,436 @@
+maintenance:
+  merge_samples:
+      CREATE TABLE sa_input_sessions_enriched AS
+      WITH
+      cfg AS (
+        SELECT property_value_max_len value_max_len,
+               query_text_property_max_len query_text_max_len
+        FROM properties_config
+        LIMIT 1
+      )
+      SELECT unix_time,
+             process_id,
+             t.client_addr, t.client_addr_overflow, ch.client_host_id,
+             t.usename, t.usename_overflow, un.usename_id,
+             t.datid, t.datname, t.datname_overflow, dn.datname_id,
+             t.state, t.state_overflow, sn.state_id,
+             t.query_text, t.query_text_overflow, q.ki_query_id ki_query_id,
+             t.wait_event_type, t.wait_event_type_overflow, wet.wait_event_type_id,
+             t.wait_event, t.wait_event_overflow, we.wait_event_id
+      FROM (
+        SELECT s.unix_time unix_time,
+               process_id,
+               substr(s.client_addr, 1, cfg.value_max_len) client_addr,
+               CASE
+                 WHEN length(s.client_addr) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END client_addr_overflow,
+               substr(s.usename, 1, cfg.value_max_len) usename,
+               CASE
+                 WHEN length(s.usename) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END usename_overflow,
+               datid,
+               substr(s.datname, 1, cfg.value_max_len) datname,
+               CASE
+                 WHEN length(s.datname) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END datname_overflow,
+               substr(s.state, 1, cfg.value_max_len) state,
+               CASE
+                 WHEN length(s.state) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END state_overflow,
+               substr(s.query, 1, cfg.query_text_max_len) query_text,
+               CASE
+                 WHEN length(s.query) > cfg.query_text_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END query_text_overflow,
+               substr(s.wait_event_type, 1, cfg.value_max_len) wait_event_type,
+               CASE
+                 WHEN length(s.wait_event_type) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_type_overflow,
+               substr(s.wait_event, 1, cfg.value_max_len) wait_event,
+               CASE
+                 WHEN length(s.wait_event) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_overflow
+        FROM cfg, sa_input_sessions_data s
+      ) t
+      LEFT JOIN sa_client_hosts ch ON (t.client_addr = ch.client_addr)
+      LEFT JOIN sa_usenames un ON (t.usename = un.usename)
+      LEFT JOIN sa_datnames dn ON (t.datname = dn.datname)
+      LEFT JOIN sa_states sn ON (t.state = sn.state)
+      LEFT JOIN sa_queries q ON (t.query_text = q.query_text)
+      LEFT JOIN sa_wait_event_types wet ON (t.wait_event_type = wet.wait_event_type)
+      LEFT JOIN sa_wait_events we ON (t.wait_event = we.wait_event);
+    
+      UPDATE sa_client_hosts
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      )
+      WHERE client_host_id IN (
+        SELECT DISTINCT client_host_id
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_client_hosts (client_addr, client_addr_overflow, last_used)
+      SELECT client_addr,
+             MAX(client_addr_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE client_host_id IS NULL
+      GROUP BY client_addr;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET client_host_id = (
+        SELECT l.client_host_id
+        FROM sa_client_hosts l
+        WHERE l.client_addr = e.client_addr
+      )
+      WHERE client_host_id IS NULL;
+      
+      UPDATE sa_usenames
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      )
+      WHERE usename_id IN (
+        SELECT DISTINCT usename_id
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_usenames (usename, usename_overflow, last_used)
+      SELECT usename,
+             MAX(usename_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE usename_id IS NULL
+      GROUP BY usename;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET usename_id = (
+        SELECT l.usename_id
+        FROM sa_usenames l
+        WHERE l.usename = e.usename
+      )
+      WHERE usename_id IS NULL;
+      
+      UPDATE sa_datnames
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      WHERE datname_id IN (
+        SELECT DISTINCT datname_id
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_datnames (datid, datname, datname_overflow, last_used)
+      SELECT datid,
+             datname,
+             MAX(datname_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE datname_id IS NULL
+      GROUP BY datname;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET datname_id = (
+        SELECT l.datname_id
+        FROM sa_datnames l
+        WHERE l.datname = e.datname
+      )
+      WHERE datname_id IS NULL;
+      
+      UPDATE sa_states
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      )
+      WHERE state_id IN (
+        SELECT DISTINCT state_id
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_states (state, state_overflow, last_used)
+      SELECT state,
+             MAX(state_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE state_id IS NULL
+      GROUP BY state;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET state_id = (
+        SELECT l.state_id
+        FROM sa_states l
+        WHERE l.state = e.state
+      )
+      WHERE state_id IS NULL;
+      
+      UPDATE sa_queries
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      )
+      WHERE ki_query_id IN (
+        SELECT DISTINCT ki_query_id
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_queries (query_text, query_text_overflow, last_used)
+      SELECT query_text,
+             MAX(query_text_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE ki_query_id IS NULL
+      GROUP BY query_text;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET ki_query_id = (
+        SELECT l.ki_query_id
+        FROM sa_queries l
+        WHERE l.query_text = e.query_text
+      )
+      WHERE ki_query_id IS NULL;
+      
+      UPDATE sa_wait_event_types
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      )
+      WHERE wait_event_type_id IN (
+        SELECT DISTINCT wait_event_type_id
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_wait_event_types (wait_event_type, wait_event_type_overflow, last_used)
+      SELECT wait_event_type,
+             MAX(wait_event_type_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE wait_event_type_id IS NULL
+      GROUP BY wait_event_type;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET wait_event_type_id = (
+        SELECT l.wait_event_type_id
+        FROM sa_wait_event_types l
+        WHERE l.wait_event_type = e.wait_event_type
+      )
+      WHERE wait_event_type_id IS NULL;
+      
+      UPDATE sa_wait_events
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      )
+      WHERE wait_event_id IN (
+        SELECT DISTINCT wait_event_id
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_wait_events (wait_event, wait_event_overflow, last_used)
+      SELECT wait_event,
+             MAX(wait_event_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE wait_event_id IS NULL
+      GROUP BY wait_event;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET wait_event_id = (
+        SELECT l.wait_event_id
+        FROM sa_wait_events l
+        WHERE l.wait_event = e.wait_event
+      )
+      WHERE wait_event_id IS NULL;
+    
+      INSERT INTO sa_active_1s_sample_groups
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1s_data'
+      )
+      SELECT unix_time/a.alignment*a.alignment unix_time,
+             1 n_samples,
+             SUM(n_elements) n_elements
+      FROM sa_active_input_sessions_count, alignment a
+      GROUP BY unix_time/a.alignment*a.alignment
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_samples = n_samples + excluded.n_samples,
+          n_elements = n_elements + excluded.n_elements;
+    
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1s_data'
+      ),
+      pre_grouped AS (
+        SELECT unix_time/a.alignment*a.alignment unix_time,
+               process_id,
+               client_host_id,
+               usename_id,
+               datname_id,
+               state_id,
+               ki_query_id,
+               wait_event_type_id,
+               wait_event_id,
+               COUNT(*) n_elements
+        FROM sa_input_sessions_enriched, alignment a
+        WHERE state_id IN (SELECT state_id FROM sa_active_states)
+        GROUP BY unix_time/a.alignment*a.alignment,
+                 process_id,
+                 client_host_id,
+                 usename_id,
+                 datname_id,
+                 state_id,
+                 ki_query_id,
+                 wait_event_type_id,
+                 wait_event_id
+      )
+      INSERT INTO sa_active_1s_data
+      SELECT * FROM pre_grouped
+      WHERE TRUE
+      ON CONFLICT (
+        unix_time,
+        process_id,
+        client_host_id,
+        usename_id,
+        datname_id,
+        state_id,
+        ki_query_id,
+        wait_event_type_id,
+        wait_event_id
+      ) DO UPDATE SET n_elements = n_elements + excluded.n_elements;
+    
+      INSERT INTO sa_active_1m_sample_groups
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1m_data'
+      )
+      SELECT unix_time/a.alignment*a.alignment unix_time,
+             1 n_samples,
+             SUM(n_elements) n_elements
+      FROM sa_active_input_sessions_count, alignment a
+      GROUP BY unix_time/a.alignment*a.alignment
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_samples = n_samples + excluded.n_samples,
+          n_elements = n_elements + excluded.n_elements;
+    
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1m_data'
+      ),
+      pre_grouped AS (
+        SELECT unix_time/a.alignment*a.alignment unix_time,
+               process_id,
+               client_host_id,
+               usename_id,
+               datname_id,
+               ki_query_id,
+               wait_event_type_id,
+               wait_event_id,
+               COUNT(*) n_elements
+        FROM sa_input_sessions_enriched, alignment a
+        GROUP BY unix_time/a.alignment*a.alignment,
+                 process_id,
+                 client_host_id,
+                 usename_id,
+                 datname_id,
+                 ki_query_id,
+                 wait_event_type_id,
+                 wait_event_id
+      )
+      INSERT INTO sa_active_1m_data
+      SELECT * FROM pre_grouped
+      WHERE TRUE
+      ON CONFLICT (
+        unix_time,
+        process_id,
+        client_host_id,
+        usename_id,
+        datname_id,
+        ki_query_id,
+        wait_event_type_id,
+        wait_event_id
+      ) DO UPDATE 
+      SET n_elements = n_elements + excluded.n_elements;
+    
+      UPDATE service_counters
+      SET n_merge_events = n_merge_events + 1,
+          n_merged_samples = n_merged_samples + (SELECT COUNT(DISTINCT unix_time)
+                                                 FROM sa_active_input_sessions_count),
+          n_merged_sessions = n_merged_sessions + (SELECT COALESCE(SUM(n_elements), 0)
+                                                   FROM sa_active_input_sessions_count
+      );
+    
+      DROP TABLE sa_input_sessions_enriched;
+    
+      DROP TABLE data_raw_input;
+      CREATE TABLE data_raw_input AS SELECT * FROM data_raw_input_template;

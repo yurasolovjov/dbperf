@@ -1,0 +1,1046 @@
+maintenance:
+  merge_samples:
+      CREATE TABLE sa_input_sessions_enriched AS
+      WITH
+      cfg AS (
+        SELECT property_value_max_len value_max_len,
+               query_text_property_max_len query_text_max_len
+        FROM properties_config
+        LIMIT 1
+      )
+      SELECT unix_time,
+             process_id,
+             t.client_addr, t.client_addr_overflow, ch.client_host_id,
+             t.usename, t.usename_overflow, un.usename_id,
+             t.datid, t.datname, t.datname_overflow, dn.datname_id,
+             t.state, t.state_overflow, sn.state_id,
+             t.query_text, t.query_text_overflow, q.ki_query_id ki_query_id,
+             t.wait_event_type, t.wait_event_type_overflow, wet.wait_event_type_id,
+             t.wait_event, t.wait_event_overflow, we.wait_event_id
+      FROM (
+        SELECT s.unix_time unix_time,
+               process_id,
+               substr(s.client_addr, 1, cfg.value_max_len) client_addr,
+               CASE
+                 WHEN length(s.client_addr) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END client_addr_overflow,
+               substr(s.usename, 1, cfg.value_max_len) usename,
+               CASE
+                 WHEN length(s.usename) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END usename_overflow,
+               datid,
+               substr(s.datname, 1, cfg.value_max_len) datname,
+               CASE
+                 WHEN length(s.datname) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END datname_overflow,
+               substr(s.state, 1, cfg.value_max_len) state,
+               CASE
+                 WHEN length(s.state) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END state_overflow,
+               substr(s.query, 1, cfg.query_text_max_len) query_text,
+               CASE
+                 WHEN length(s.query) > cfg.query_text_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END query_text_overflow,
+               substr(s.wait_event_type, 1, cfg.value_max_len) wait_event_type,
+               CASE
+                 WHEN length(s.wait_event_type) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_type_overflow,
+               substr(s.wait_event, 1, cfg.value_max_len) wait_event,
+               CASE
+                 WHEN length(s.wait_event) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_overflow
+        FROM cfg, sa_input_sessions_data s
+      ) t
+      LEFT JOIN sa_client_hosts ch ON (t.client_addr = ch.client_addr)
+      LEFT JOIN sa_usenames un ON (t.usename = un.usename)
+      LEFT JOIN sa_datnames dn ON (t.datname = dn.datname)
+      LEFT JOIN sa_states sn ON (t.state = sn.state)
+      LEFT JOIN sa_queries q ON (t.query_text = q.query_text)
+      LEFT JOIN sa_wait_event_types wet ON (t.wait_event_type = wet.wait_event_type)
+      LEFT JOIN sa_wait_events we ON (t.wait_event = we.wait_event);
+    
+      UPDATE sa_client_hosts
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      )
+      WHERE client_host_id IN (
+        SELECT DISTINCT client_host_id
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE client_host_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_client_hosts (client_addr, client_addr_overflow, last_used)
+      SELECT client_addr,
+             MAX(client_addr_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE client_host_id IS NULL
+      GROUP BY client_addr;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET client_host_id = (
+        SELECT l.client_host_id
+        FROM sa_client_hosts l
+        WHERE l.client_addr = e.client_addr
+      )
+      WHERE client_host_id IS NULL;
+      
+      UPDATE sa_usenames
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      )
+      WHERE usename_id IN (
+        SELECT DISTINCT usename_id
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE usename_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_usenames (usename, usename_overflow, last_used)
+      SELECT usename,
+             MAX(usename_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE usename_id IS NULL
+      GROUP BY usename;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET usename_id = (
+        SELECT l.usename_id
+        FROM sa_usenames l
+        WHERE l.usename = e.usename
+      )
+      WHERE usename_id IS NULL;
+      
+      UPDATE sa_datnames
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      WHERE datname_id IN (
+        SELECT DISTINCT datname_id
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE datname_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_datnames (datid, datname, datname_overflow, last_used)
+      SELECT datid,
+             datname,
+             MAX(datname_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE datname_id IS NULL
+      GROUP BY datname;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET datname_id = (
+        SELECT l.datname_id
+        FROM sa_datnames l
+        WHERE l.datname = e.datname
+      )
+      WHERE datname_id IS NULL;
+      
+      UPDATE sa_states
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      )
+      WHERE state_id IN (
+        SELECT DISTINCT state_id
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE state_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_states (state, state_overflow, last_used)
+      SELECT state,
+             MAX(state_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE state_id IS NULL
+      GROUP BY state;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET state_id = (
+        SELECT l.state_id
+        FROM sa_states l
+        WHERE l.state = e.state
+      )
+      WHERE state_id IS NULL;
+      
+      UPDATE sa_queries
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      )
+      WHERE ki_query_id IN (
+        SELECT DISTINCT ki_query_id
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE ki_query_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_queries (query_text, query_text_overflow, last_used)
+      SELECT query_text,
+             MAX(query_text_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE ki_query_id IS NULL
+      GROUP BY query_text;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET ki_query_id = (
+        SELECT l.ki_query_id
+        FROM sa_queries l
+        WHERE l.query_text = e.query_text
+      )
+      WHERE ki_query_id IS NULL;
+      
+      UPDATE sa_wait_event_types
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      )
+      WHERE wait_event_type_id IN (
+        SELECT DISTINCT wait_event_type_id
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_type_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_wait_event_types (wait_event_type, wait_event_type_overflow, last_used)
+      SELECT wait_event_type,
+             MAX(wait_event_type_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE wait_event_type_id IS NULL
+      GROUP BY wait_event_type;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET wait_event_type_id = (
+        SELECT l.wait_event_type_id
+        FROM sa_wait_event_types l
+        WHERE l.wait_event_type = e.wait_event_type
+      )
+      WHERE wait_event_type_id IS NULL;
+      
+      UPDATE sa_wait_events
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      )
+      WHERE wait_event_id IN (
+        SELECT DISTINCT wait_event_id
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM sa_input_sessions_enriched
+        WHERE wait_event_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_wait_events (wait_event, wait_event_overflow, last_used)
+      SELECT wait_event,
+             MAX(wait_event_overflow),
+             MAX(unix_time)
+      FROM sa_input_sessions_enriched
+      WHERE wait_event_id IS NULL
+      GROUP BY wait_event;
+      
+      UPDATE sa_input_sessions_enriched AS e
+      SET wait_event_id = (
+        SELECT l.wait_event_id
+        FROM sa_wait_events l
+        WHERE l.wait_event = e.wait_event
+      )
+      WHERE wait_event_id IS NULL;
+    
+      INSERT INTO sa_active_1s_sample_groups
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1s_data'
+      )
+      SELECT unix_time/a.alignment*a.alignment unix_time,
+             1 n_samples,
+             SUM(n_elements) n_elements
+      FROM sa_active_input_sessions_count, alignment a
+      GROUP BY unix_time/a.alignment*a.alignment
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_samples = n_samples + excluded.n_samples,
+          n_elements = n_elements + excluded.n_elements;
+    
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1s_data'
+      ),
+      pre_grouped AS (
+        SELECT unix_time/a.alignment*a.alignment unix_time,
+               process_id,
+               client_host_id,
+               usename_id,
+               datname_id,
+               state_id,
+               ki_query_id,
+               wait_event_type_id,
+               wait_event_id,
+               COUNT(*) n_elements
+        FROM sa_input_sessions_enriched, alignment a
+        WHERE state_id IN (SELECT state_id FROM sa_active_states)
+        GROUP BY unix_time/a.alignment*a.alignment,
+                 process_id,
+                 client_host_id,
+                 usename_id,
+                 datname_id,
+                 state_id,
+                 ki_query_id,
+                 wait_event_type_id,
+                 wait_event_id
+      )
+      INSERT INTO sa_active_1s_data
+      SELECT * FROM pre_grouped
+      WHERE TRUE
+      ON CONFLICT (
+        unix_time,
+        process_id,
+        client_host_id,
+        usename_id,
+        datname_id,
+        state_id,
+        ki_query_id,
+        wait_event_type_id,
+        wait_event_id
+      ) DO UPDATE SET n_elements = n_elements + excluded.n_elements;
+    
+      INSERT INTO locks_1s_start_ts(id, unix_time)
+      VALUES (1, (SELECT MIN(unix_time) FROM locks_input_count))
+      ON CONFLICT(id) 
+      DO NOTHING;
+    
+      CREATE TABLE locks_input_enriched AS
+      WITH
+      cfg AS (
+        SELECT property_value_max_len value_max_len,
+               query_text_property_max_len query_text_max_len
+        FROM properties_config
+        LIMIT 1
+      )
+      SELECT t.unix_time,
+             t.process_id,
+             t.xact_start,
+             t.state_change,
+             t.query_start,
+             t.locktype, l.locktype_id,
+             m.mode_id,
+             t.datid, d.datname_id, t.datname, t.datname_overflow,
+             t.client_addr, t.client_addr_overflow, ch.client_host_id,
+             t.usename, t.usename_overflow, un.usename_id,
+             t.state, t.state_overflow, sn.state_id,
+             t.query_text, t.query_text_overflow, q.ki_query_id ki_query_id,
+             t.wait_event_type, t.wait_event_type_overflow, wet.wait_event_type_id,
+             t.wait_event, t.wait_event_overflow, we.wait_event_id,
+             t.relation,
+             t.page,
+             t.tuple,
+             t.virtualxid,
+             t.transactionid,
+             t.classid,
+             t.objid,
+             t.objsubid,
+             o.object_id,
+             t.granted
+      FROM (
+        SELECT s.unix_time unix_time,
+               process_id,
+               xact_start,
+               state_change,
+               query_start,
+               locktype,
+               mode,
+               datid,
+               substr(s.datname, 1, cfg.value_max_len) datname,
+               CASE
+                   WHEN length(s.datname) > cfg.value_max_len
+                   THEN TRUE
+                   ELSE NULL
+               END datname_overflow,
+               substr(s.client_addr, 1, cfg.value_max_len) client_addr,
+               CASE
+                 WHEN length(s.client_addr) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END client_addr_overflow,
+               substr(s.usename, 1, cfg.value_max_len) usename,
+               CASE
+                 WHEN length(s.usename) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END usename_overflow,
+               substr(s.state, 1, cfg.value_max_len) state,
+               CASE
+                 WHEN length(s.state) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END state_overflow,
+               substr(s.query, 1, cfg.query_text_max_len) query_text,
+               CASE
+                 WHEN length(s.query) > cfg.query_text_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END query_text_overflow,
+               substr(s.wait_event_type, 1, cfg.value_max_len) wait_event_type,
+               CASE
+                 WHEN length(s.wait_event_type) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_type_overflow,
+               substr(s.wait_event, 1, cfg.value_max_len) wait_event,
+               CASE
+                 WHEN length(s.wait_event) > cfg.value_max_len
+                 THEN TRUE
+                 ELSE NULL
+               END wait_event_overflow,
+               relation,
+               page,
+               tuple,
+               virtualxid,
+               transactionid,
+               classid,
+               objid,
+               objsubid,
+               granted
+        FROM cfg, locks_input_data s
+      ) t
+      LEFT JOIN locks_locktypes l ON (t.locktype = l.locktype)
+      LEFT JOIN locks_objects_extended o ON (t.datid = o.datid
+                                        AND t.relation = o.relation
+                                        AND t.page = o.page
+                                        AND t.tuple = o.tuple
+                                        AND t.classid = o.classid
+                                        AND t.objid = o.objid
+                                        AND t.objsubid = o.objsubid)
+      LEFT JOIN locks_modes m ON (t.mode = m.mode)
+      LEFT JOIN sa_datnames d ON (t.datname = d.datname)
+      LEFT JOIN sa_client_hosts ch ON (t.client_addr = ch.client_addr)
+      LEFT JOIN sa_usenames un ON (t.usename = un.usename)
+      LEFT JOIN sa_states sn ON (t.state = sn.state)
+      LEFT JOIN sa_queries q ON (t.query_text = q.query_text)
+      LEFT JOIN sa_wait_event_types wet ON (t.wait_event_type = wet.wait_event_type)
+      LEFT JOIN sa_wait_events we ON (t.wait_event = we.wait_event)
+      WHERE (t.unix_time - (SELECT MIN(unix_time)
+                            FROM locks_1s_start_ts)) % (SELECT alignment
+                                                        FROM alignment_config
+                                                        WHERE data_table = 'locks_1s_data') = 0;
+    
+      UPDATE sa_datnames
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      WHERE datname_id IN (
+        SELECT DISTINCT datname_id
+        FROM locks_input_enriched
+        WHERE datname_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE datname_id IS NOT NULL
+      );
+      
+      INSERT INTO sa_datnames (datid, datname, datname_overflow, last_used)
+      SELECT datid,
+             datname,
+             datname_overflow,
+             MAX(unix_time)
+      FROM locks_input_enriched
+      WHERE datname_id IS NULL
+      GROUP BY datid, datname, datname_overflow
+      ON CONFLICT(datname) DO UPDATE
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE datname_id IS NULL);
+      
+      UPDATE locks_input_enriched AS e
+      SET datname_id = (
+        SELECT l.datname_id
+        FROM sa_datnames l
+        WHERE l.datname = e.datname
+      )
+      WHERE datname_id IS NULL;
+      
+      UPDATE locks_locktypes
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE locktype_id IS NOT NULL
+      )
+      WHERE locktype_id IN (
+        SELECT DISTINCT locktype_id
+        FROM locks_input_enriched
+        WHERE locktype_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE locktype_id IS NOT NULL
+      );
+      
+      INSERT INTO locks_locktypes (locktype, last_used)
+      SELECT locktype,
+             MAX(unix_time)
+      FROM locks_input_enriched
+      WHERE locktype_id IS NULL
+      GROUP BY locktype;
+      
+      UPDATE locks_input_enriched AS e
+      SET locktype_id = (
+        SELECT l.locktype_id
+        FROM locks_locktypes l
+        WHERE l.locktype = e.locktype
+      )
+      WHERE locktype_id IS NULL;
+      
+      UPDATE locks_objects
+      SET last_used = (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE object_id IS NOT NULL
+      )
+      WHERE object_id IN (
+        SELECT DISTINCT object_id
+        FROM locks_input_enriched
+        WHERE object_id IS NOT NULL
+      )
+      AND last_used < (
+        SELECT MAX(unix_time)
+        FROM locks_input_enriched
+        WHERE object_id IS NOT NULL
+      );
+      
+      INSERT INTO locks_objects (datname_id, relation, page, tuple, classid, objid, objsubid, last_used)
+      SELECT datname_id,
+             relation,
+             page,
+             tuple,
+             classid,
+             objid,
+             objsubid,
+             MAX(unix_time)
+      FROM locks_input_enriched
+      WHERE object_id IS NULL
+      GROUP BY datname_id, relation, page, tuple, classid, objid, objsubid
+      ON CONFLICT(datname_id, relation, page, tuple, classid, objid, objsubid) DO UPDATE
+      SET last_used = (SELECT MAX(unix_time)
+                       FROM locks_input_enriched
+                       WHERE object_id IS NOT NULL);
+      
+      UPDATE locks_input_enriched AS e
+      SET object_id = (
+        SELECT l.object_id
+        FROM locks_objects l
+        WHERE l.datname_id = e.datname_id
+          AND l.relation = e.relation
+          AND l.page = e.page
+          AND l.tuple = e.tuple
+          AND l.classid = e.classid
+          AND l.objid = e.objid
+          AND l.objsubid = e.objsubid
+      )
+      WHERE object_id IS NULL;
+    
+      INSERT INTO locks_1s_sample_groups
+      SELECT unix_time,
+             1 n_samples,
+             SUM(n_elements) n_elements
+      FROM locks_input_count
+      GROUP BY unix_time
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_samples = n_samples + excluded.n_samples,
+          n_elements = n_elements + excluded.n_elements;
+    
+      INSERT INTO locks_1s_metrics
+      SELECT unix_time,
+             0 n_blocking,
+             0 n_blocked
+      FROM locks_input_count
+      WHERE (unix_time - (SELECT MIN(unix_time)
+                          FROM locks_1s_start_ts)) % (SELECT alignment
+                                                      FROM alignment_config
+                                                      WHERE data_table = 'locks_1s_data') = 0
+      GROUP BY unix_time
+      ON CONFLICT(unix_time) DO UPDATE
+            SET n_blocking = n_blocking + excluded.n_blocking,
+                n_blocked = n_blocked + excluded.n_blocked;
+    
+      INSERT INTO locks_1s_metrics
+      SELECT blocking_procs.unix_time,
+             COUNT(DISTINCT blocking_procs.blocking_pid) n_blocking,
+             COUNT(DISTINCT blocking_procs.blocked_pid) n_blocked
+      FROM (SELECT kl.unix_time,
+                   kl.process_id blocking_pid,
+                   bl.process_id blocked_pid
+            FROM locks_input_enriched bl
+            JOIN locks_input_enriched kl ON bl.locktype = kl.locktype 
+                  	  	    			AND NOT bl.datid IS distinct FROM kl.datid
+                  	  					AND NOT bl.relation IS distinct FROM kl.relation
+                  	  					AND NOT bl.page IS distinct FROM kl.page
+                  	  					AND NOT bl.tuple IS distinct FROM kl.tuple
+                  	  					AND NOT bl.virtualxid IS distinct FROM kl.virtualxid
+                  	  					AND NOT bl.transactionid IS distinct FROM kl.transactionid
+                  	  					AND NOT bl.classid IS distinct FROM kl.classid
+                  	  					AND NOT bl.objid IS distinct FROM kl.objid
+                  	  					AND NOT bl.objsubid IS distinct FROM kl.objsubid
+                  	  					AND bl.process_id <> kl.process_id
+            WHERE kl.granted
+            AND NOT bl.granted) blocking_procs
+      WHERE (blocking_procs.unix_time - (SELECT MIN(unix_time)
+                                         FROM locks_1s_start_ts)) % (SELECT alignment
+                                                                     FROM alignment_config
+                                                                     WHERE data_table = 'locks_1s_data') = 0
+      GROUP BY unix_time
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_blocking = n_blocking + excluded.n_blocking,
+          n_blocked = n_blocked + excluded.n_blocked;
+    
+      WITH
+      pre_grouped AS (
+        SELECT unix_time,
+               process_id,
+               xact_start,
+               state_change,
+               query_start,
+               locktype_id,
+               mode_id,
+               object_id,
+               usename_id,
+               client_host_id,
+               state_id,
+               wait_event_type_id,
+               wait_event_id,
+               ki_query_id,
+               virtualxid,
+               transactionid,
+               granted,
+               COUNT(*) n_elements
+        FROM locks_input_enriched
+        GROUP BY unix_time,
+                 process_id,
+                 xact_start,
+                 state_change,
+                 query_start,
+                 locktype_id,
+                 mode_id,
+                 object_id,
+                 usename_id,
+                 client_host_id,
+                 state_id,
+                 wait_event_type_id,
+                 wait_event_id,
+                 ki_query_id,
+                 virtualxid,
+                 transactionid,
+                 granted
+      )
+      INSERT INTO locks_1s_data
+      SELECT * FROM pre_grouped
+      WHERE TRUE
+      ON CONFLICT (
+        unix_time,
+        process_id,
+        xact_start,
+        state_change,
+        query_start,
+        locktype_id,
+        mode_id,
+        object_id,
+        usename_id,
+        client_host_id,
+        state_id,
+        wait_event_type_id,
+        wait_event_id,
+        ki_query_id,
+        virtualxid,
+        transactionid,
+        granted
+      ) DO NOTHING;
+    
+      INSERT INTO sa_active_1m_sample_groups
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1m_data'
+      )
+      SELECT unix_time/a.alignment*a.alignment unix_time,
+             1 n_samples,
+             SUM(n_elements) n_elements
+      FROM sa_active_input_sessions_count, alignment a
+      GROUP BY unix_time/a.alignment*a.alignment
+      ON CONFLICT(unix_time) DO UPDATE
+      SET n_samples = n_samples + excluded.n_samples,
+          n_elements = n_elements + excluded.n_elements;
+    
+      WITH
+      alignment AS (
+        SELECT alignment
+        FROM alignment_config
+        WHERE data_table = 'sa_active_1m_data'
+      ),
+      pre_grouped AS (
+        SELECT unix_time/a.alignment*a.alignment unix_time,
+               process_id,
+               client_host_id,
+               usename_id,
+               datname_id,
+               ki_query_id,
+               wait_event_type_id,
+               wait_event_id,
+               COUNT(*) n_elements
+        FROM sa_input_sessions_enriched, alignment a
+        GROUP BY unix_time/a.alignment*a.alignment,
+                 process_id,
+                 client_host_id,
+                 usename_id,
+                 datname_id,
+                 ki_query_id,
+                 wait_event_type_id,
+                 wait_event_id
+      )
+      INSERT INTO sa_active_1m_data
+      SELECT * FROM pre_grouped
+      WHERE TRUE
+      ON CONFLICT (
+        unix_time,
+        process_id,
+        client_host_id,
+        usename_id,
+        datname_id,
+        ki_query_id,
+        wait_event_type_id,
+        wait_event_id
+      ) DO UPDATE 
+      SET n_elements = n_elements + excluded.n_elements;
+    
+      UPDATE service_counters
+      SET n_merge_events = n_merge_events + 1,
+          n_merged_samples = n_merged_samples + (SELECT COUNT(DISTINCT unix_time)
+                                                 FROM sa_active_input_sessions_count),
+          n_merged_sessions = n_merged_sessions + (SELECT COALESCE(SUM(n_elements), 0)
+                                                   FROM sa_active_input_sessions_count),
+          n_merged_locks = n_merged_locks + (SELECT COALESCE(SUM(n_elements), 0)
+                                             FROM locks_input_count
+          );
+    
+      DROP TABLE sa_input_sessions_enriched;
+    
+      DROP TABLE locks_input_enriched;
+    
+      DROP TABLE data_raw_input;
+      CREATE TABLE data_raw_input AS SELECT * FROM data_raw_input_template;
+data:
+  check_timestamp_existence: >
+    SELECT EXISTS(SELECT ?2 dummy 
+                  FROM locks_1s_data d
+                  JOIN locks_objects_extended e ON (d.object_id = e.object_id)
+                  WHERE unix_time = ?1
+                    AND ({{.Filter}})
+    );
+  check_locks_metrics: >
+    SELECT EXISTS(SELECT ?3 dummy FROM locks_1s_metrics WHERE unix_time >= ?1 AND unix_time <= ?2);
+  select_slice_time_totals_locks: >
+    WITH bounded_totals AS (
+      SELECT t.unix_time/?1*?1,
+             t.unix_time,
+             SUM(t.n_samples) n_samples,
+             SUM(m.n_{{.Type}}) n_elements 
+      FROM locks_1s_sample_groups t
+      JOIN locks_1s_metrics m USING(unix_time)
+      WHERE t.unix_time >= ?2
+        AND t.unix_time < (?3 + ?1)
+      GROUP BY 1
+    ),
+    dummy AS (
+      SELECT ?4
+    )
+    SELECT unix_time,
+           ROUND(CAST(n_elements  AS REAL) / n_samples, 3) aas_value,
+           ROUND(CAST(n_total_sessions AS REAL) / n_total_samples, 3) avg_aas_value
+    FROM (
+        SELECT unix_time,
+               n_samples,
+               n_elements ,
+               SUM(n_samples) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_samples,
+               SUM(n_elements) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n_total_sessions
+        FROM bounded_totals bt
+    );
+  select_locks_metrics_per_ts: >
+    WITH dummy AS (
+      SELECT ?2
+    )
+    SELECT n_blocking,
+           n_blocked
+    FROM locks_1s_metrics
+    WHERE unix_time = ?1;
+  select_locks_tree_per_ts: >
+    WITH cfg AS (
+      SELECT query_text_property_max_len
+      FROM properties_config
+      LIMIT 1
+    ),
+    dummy AS (
+      SELECT ?2
+    ),
+    data AS (
+      WITH l AS (SELECT d.*,
+                        e.datname_id,
+                        e.datid,
+                        CASE
+                          WHEN e.relation = 0
+                          THEN NULL
+                          ELSE e.relation 
+                        END relation,
+                        CASE
+                          WHEN e.page = 0
+                          THEN NULL
+                          ELSE e.page
+                        END page,
+                        CASE
+                          WHEN e.tuple = 0
+                          THEN NULL
+                          ELSE e.tuple
+                        END tuple,
+                        CASE
+                          WHEN e.classid = 0
+                          THEN NULL
+                          ELSE e.classid
+                        END classid,
+                        CASE
+                          WHEN e.objid = 0
+                          THEN NULL
+                          ELSE e.objid
+                        END objid,
+                        CASE
+                          WHEN e.objsubid = 0
+                          THEN NULL
+                          ELSE e.objsubid
+                        END objsubid
+                 FROM locks_1s_data d
+                 JOIN locks_objects_extended e ON (d.object_id = e.object_id)
+                 WHERE {{.Filter}})
+      SELECT l.*,
+             ll.locktype
+      FROM l
+      JOIN locks_locktypes ll ON (l.locktype_id = ll.locktype_id)
+      WHERE l.unix_time = ?1
+    )
+    SELECT * FROM (
+      WITH RECURSIVE l(process_id, locktype_id, granted, mode_id, object) AS (
+        SELECT process_id,
+               locktype_id,
+               granted,
+               mode_id,
+               json_object('locktype', locktype, 'database', datid, 'relation', relation, 'page', page, 'tuple', tuple, 
+                           'virtualxid', virtualxid, 'transactionid', transactionid, 'classid', classid,
+                           'objid', objid, 'objsubid', objsubid) object
+        FROM data),
+      pairs AS (
+        SELECT w.process_id waiter,
+               l.process_id locker,
+               l.object,
+               l.mode_id
+        FROM l w
+        JOIN l ON l.object IS NOT DISTINCT FROM w.object
+        AND l.locktype_id = w.locktype_id
+        AND NOT l.process_id = w.process_id
+        AND l.granted WHERE NOT w.granted
+        AND NOT EXISTS (SELECT 1
+                        FROM l i
+                        WHERE i.process_id = l.process_id
+                          AND i.locktype_id = l.locktype_id
+                          AND i.object IS NOT DISTINCT FROM l.object
+                          AND i.mode_id > l.mode_id)),
+      leads AS (
+        SELECT o.locker,
+               1 level,
+               count(*) q,
+               json_array(locker) track,
+               false AS cycle
+        FROM pairs o
+        GROUP BY o.locker
+        UNION ALL
+        SELECT i.locker,
+               leads.level+1,
+               (SELECT count(*) FROM pairs q WHERE q.locker=i.locker) q,
+               json_insert(leads.track, '$[#]', i.locker) track,
+               exists(SELECT 1 FROM json_each(json_extract(leads.track, '$')) WHERE json_each.value = i.locker) cycle
+        FROM pairs i, leads
+        WHERE i.waiter = leads.locker
+        AND NOT cycle),
+      subtree AS (
+        SELECT locker process_id,
+               locker parent,
+               locker root,
+               CASE
+                 WHEN cycle
+                 THEN track
+               END dl,
+               json_object('locktype', NULL, 'database', NULL, 'relation', NULL, 'page', NULL, 'tuple', NULL, 
+                           'virtualxid', NULL, 'transactionid', NULL, 'classid', NULL, 'objid', NULL,
+                           'objsubid', NULL) object,
+               0 level,
+               cast(locker AS text) path,
+               json_group_array(locker) OVER () all_pids
+        FROM leads o
+        WHERE (cycle
+               AND NOT EXISTS (SELECT exists(SELECT 1
+                                             FROM json_each(json_extract(o.track, '$'))
+                                             WHERE json_each.value = i.locker)
+                               FROM leads i
+                               WHERE (i.level > o.level OR i.q < o.q)))
+        OR (NOT cycle
+            AND NOT EXISTS (SELECT 1
+                            FROM pairs
+                            WHERE waiter = o.locker)
+            AND NOT EXISTS (SELECT 1
+                            FROM leads i
+                            WHERE i.locker = o.locker
+                              AND i.level < o.level))
+        UNION ALL
+        SELECT w.waiter process_id,
+               subtree.process_id,
+               subtree.root,
+               CASE
+                 WHEN exists(SELECT 1 FROM json_each(json_extract(subtree.dl, '$')) WHERE json_each.value = w.waiter)
+                 THEN subtree.dl
+               END,
+               w.object,
+               subtree.level+1,
+               subtree.path || '.' || w.waiter,
+               all_pids
+        FROM subtree
+        JOIN pairs w ON subtree.process_id = w.locker
+                    AND NOT exists(SELECT 1
+                                   FROM json_each(json_extract(all_pids, '$'))
+                                   WHERE json_each.value = w.waiter)
+      ),
+      tree AS (
+        SELECT process_id,
+               parent,
+               root,
+               dl,
+               object,
+               level,
+               path,
+               all_pids,
+               json_group_array(process_id) OVER ()
+        FROM subtree
+      ),
+      d AS (
+        SELECT process_id,
+               exists(SELECT 1 FROM json_each(json_extract(dl, '$')) WHERE json_each.value = process_id) is_deadlock
+        FROM tree
+      )
+      SELECT DISTINCT
+             (strftime('%s', 'now') - r.xact_start) order_1, 
+             path order_2,
+             (a.unix_time - a.xact_start) xact_start,
+             a.xact_start xact_age,
+             (a.unix_time - a.state_change) state_change_start,
+             a.state_change state_change_age,
+             (a.unix_time - a.query_start) query_start,
+             a.query_start query_age,
+             dn.datname,
+             un.usename,
+             ch.client_addr,
+             d.is_deadlock,
+             CASE
+               WHEN d.is_deadlock
+               THEN json_extract(tree.dl, '$[1]')
+               ELSE NULL
+             END deadlock_pid,
+             CASE
+               WHEN d.is_deadlock
+               THEN (json_object('locktype', a.locktype, 'database', a.datid, 'relation', a.relation, 'page', a.page,
+                                 'tuple', a.tuple, 'virtualxid', a.virtualxid, 'transactionid', a.transactionid,
+                                 'classid', a.classid, 'objid', a.objid, 'objsubid', a.objsubid))
+               ELSE w.object
+             END wait_on_object,
+             tree.process_id,
+             sn.state,
+             wet.wait_event_type,
+             wt.wait_event,
+             parent,
+             level,
+             (SELECT count(*) FROM tree p WHERE p.path LIKE (tree.path||'%') AND NOT p.path = tree.path) blocked,
+             substr(q.query_text, 1, cfg.query_text_property_max_len) query
+      FROM cfg, tree
+      LEFT JOIN pairs w ON w.waiter = tree.process_id
+                       AND w.locker = tree.parent
+      JOIN d USING (process_id)
+      JOIN data a USING (process_id)
+      JOIN data r ON r.process_id=tree.root
+      JOIN sa_datnames dn ON a.datname_id = dn.datname_id
+      JOIN sa_usenames un ON a.usename_id = un.usename_id
+      JOIN sa_client_hosts ch ON a.client_host_id = ch.client_host_id
+      JOIN sa_states sn ON a.state_id = sn.state_id
+      JOIN sa_wait_event_types wet ON a.wait_event_type_id = wet.wait_event_type_id
+      JOIN sa_wait_events wt ON a.wait_event_id = wt.wait_event_id
+      JOIN sa_queries q ON a.ki_query_id = q.ki_query_id
+      GROUP BY tree.process_id
+      ORDER BY 1 DESC, 2);

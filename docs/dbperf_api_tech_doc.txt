@@ -1,0 +1,355 @@
+﻿# API компонента
+
+
+Компонент предоставляет следующие виды запросов:
+
+
+| Путь         | Метод | Описание                                                                           |
+|--------------|:------|:-----------------------------------------------------------------------------------|
+| /performance | POST  | Получение списка всех баз данных по экземпляру сервера БД, указанного в соединении |
+| /scrapper    | GET   | Получение информации о статусе подключения к наблюдаемой БД                        |
+| /metrics     | GET   | Используется для забора метрик, собираемых внутри dbperf посредством Prometheus    |
+
+
+## Метрики dbperf
+[Полный список и описание метрик dbperf](../../services/dbperf/README.md)
+
+
+## `GET /scrapper/{advisory_id}`
+Доступ к API-вызову разрешен в случае, если пользователь обладает ролью `kintsugi-user`.
+
+
+### Спецификация запроса
+Обязательных заголовков не требуется
+
+
+### Возвращаемые ответы
+
+
+| Описание                          | Код состояния HTTP | Тип тела ответа |
+|-----------------------------------|--------------------|:----------------|
+| Успешная обработка запроса        | `200`              | JSON-объект     |
+| Скрапер для advisory_id не найден | `404`              | ErrorResponse   |
+| Некорректный HTTP-метод           | `405`              | ErrorResponse   |
+| Некорректный формат advisory_id   | `415`              | ErrorResponse   |
+| Не удалось обработать запрос      | `422`              | ErrorResponse   |
+
+
+Примеры успешного ответа (`200`):
+```json
+{
+  "storage_id": "a84156f3-71e2-4f9b-9d2d-4d085fe1f9cf",
+  "disconnected_since": null,
+  "last_connection_attempt": 1755164428,
+  "error": null,
+  "status": "connected",
+  "custom_parameters": {
+    "activity_resolution_sec": 1,
+    "gather_locks": true,
+    "history_depth_seconds": 86400,
+    "locks_interval_sec": 1,
+    "query_max_length_bytes": 1024,
+    "storage_size_limit_bytes": 500000,
+    "storage_type": "in-memory"
+  }
+}
+```
+```json
+{
+  "storage_id": "a84156f3-71e2-4f9b-9d2d-4d085fe1f9cf", 
+  "disconnected_since": 1755164416, 
+  "last_connection_attempt": 1755164428, 
+  "error": {
+    "summary": "failed to connect to `host=10.10.10.10 user=postgres database=postgres`: dial error (timeout: dial tcp 10.10.10.10:5433: connect: operation timed out)"
+  }, 
+  "status": "disconnected", 
+  "custom_parameters": {
+    "activity_resolution_sec": 1, 
+    "gather_locks": true, 
+    "history_depth_seconds": 86400, 
+    "locks_interval_sec": 1, 
+    "query_max_length_bytes": 1024, 
+    "storage_size_limit_bytes": 500000, 
+    "storage_type": "in-memory"
+  }
+}
+```
+
+
+Пример ErrorResponse:  
+```json
+{
+  "detail": "request processing completed without result, scrapper not found"
+}
+```
+
+
+
+
+## `POST /performance`
+Доступ к API-вызову разрешен в случае, если пользователь обладает ролью `kintsugi-user`.
+
+
+### Спецификация запроса
+Обязательный заголовок `X-Piface-Source-Id` - идентификатор запроса в форме строкового представления UUID (заголовок настраивается в сервисе piface)
+
+
+### Пример тела запроса метрик производительности БД
+
+
+```json
+{
+   "start_time": 1734957687,
+   "end_time": 1734958587,
+   "metrics": [
+      {
+         "metric": "db.active_sessions",
+         "slicing": [
+            {
+               "type": "time",
+               "interval": 2
+            },
+            {
+               "type": "top",
+               "key": "wait_event_type",
+               "limit": 10
+            }
+         ]
+      },
+      {
+         "metric": "db.active_sessions",
+         "units": "ptta",
+         "slicing": [
+            {
+               "type": "top",
+               "key": "query",
+               "limit": 25
+            },
+            {
+               "type": "top",
+               "key": "wait_event_type",
+               "limit": 10
+            }
+         ]
+      }
+   ],
+   "instance_id": 1
+}
+```
+
+
+### Возвращаемые ответы
+
+
+| Описание                                                        | Код состояния HTTP | Тип тела ответа |
+|-----------------------------------------------------------------|--------------------|:----------------|
+| Метрики производительности БД получены                          | `200`              | JSON-объект     |
+| Не удалось получить запрашиваемые метрики производительности БД | `404`              | ErrorResponse   |
+| Некорректный HTTP-метод                                         | `405`              | ErrorResponse   |
+| Не удалось обработать запрос                                    | `422`              | ErrorResponse   |
+
+
+
+
+Пример успешного ответа (`200`):
+```json
+{
+   "end_time": 1735046104,
+   "metrics": [
+      {
+         "type": "time_series",
+         "metric": "db.active_sessions",
+         "units": "aas",
+         "filter": null,
+         "timestamps": [
+            1735045200,
+            1735045208,
+            1735045216
+         ],
+         "values": [
+            0.625,
+            0.5,
+            0.75
+         ],
+         "average": 0.625,
+         "slicing": {
+            "type": "top",
+            "key": "wait_event_type",
+            "slices": [
+               {
+                  "remainder": null,
+                  "properties": {
+                     "wait_event_type.id": 2,
+                     "wait_event_type.short_name": "Timeout"
+                  },
+                  "values": [
+                     0.5,
+                     0.5,
+                     0.625
+                  ],
+                  "average": 0.542
+               },
+               {
+                  "remainder": null,
+                  "properties": {
+                     "wait_event_type.id": 3,
+                     "wait_event_type.short_name": "CPU"
+                  },
+                  "values": [
+                     0.125,
+                     0,
+                     0
+                  ],
+                  "average": 0.042
+               },
+               {
+                  "remainder": null,
+                  "properties": {
+                     "wait_event_type.id": 1,
+                     "wait_event_type.short_name": "Client"
+                  },
+                  "values": [
+                     0,
+                     0,
+                     0.125
+                  ],
+                  "average": 0.042
+               },
+               {
+                  "remainder": true,
+                  "properties": null,
+                  "values": [
+                     0,
+                     0,
+                     0
+                  ],
+                  "average": 0
+               }
+            ]
+         }
+      }
+   ],
+   "start_time": 1735045200,
+   "time_alignment": 8
+}
+```
+
+
+Пример ответа с ошибкой (`404`):
+```json
+{
+  "detail": "missing source with instance id=1"
+}
+```
+
+
+Пример ответа, если не удалось обработать запроса (`422`):
+```json
+{
+  "detail": "Key: 'Discriminator' Error:Field validation for 'Discriminator' failed on the 'required' tag"
+}
+```
+
+
+
+
+## Типы возвращаемых метрик
+
+
+### `MetricTsData`
+```json
+{
+   "type": "time_series",
+   "metric": "db.active_sessions",
+   "units": "aas",
+   "filter": null, 
+   "timestamps": [
+       1735046012,
+       1735046014,
+       1735046016
+   ],
+   "values": [
+       1,
+       0,
+       1
+   ],
+   "average": 0.666,
+   "slicing": {
+       "type": "top",
+       "key": "wait_event_type",
+       "slices": [
+           {
+               "remainder": null,
+               "properties": {
+                   "wait_event_type.id": 2,
+                   "wait_event_type.short_name": "Timeout"
+               },
+               "values": [
+                   1,
+                   0,
+                   1
+               ],
+               "average": 0.666
+           },
+           {
+               "remainder": true,
+               "properties": null,
+               "values": [
+                   0,
+                   0,
+                   0
+               ],
+               "average": 0
+           }
+       ]
+  }
+}
+```
+
+
+### `MetricScalarData`
+```json
+{
+   "type": "scalar",
+   "metric": "db.active_sessions",
+   "units": "ptta",
+   "filter": null,
+   "slicing": {
+      "type": "top",
+      "key": "query",
+      "slices": [
+         {
+            "remainder": null,
+            "properties": {
+               "query.id": 15,
+               "query.ki_query_id": 15,
+               "query.short_text": "WITH a AS (SELECT sum(xact_commit+xact_rollback) s \nFROM pg_stat",
+               "query.short_text_overflow": true
+            },
+            "value": 100,
+            "slicing": {
+               "type": "top",
+               "key": "wait_event_type",
+               "slices": [
+                  {
+                     "remainder": null,
+                     "properties": {
+                        "wait_event_type.id": 2,
+                        "wait_event_type.short_name": "Timeout"
+                     },
+                     "value": 100,
+                     "slicing": null
+                  },
+                  {
+                     "remainder": true,
+                     "properties": null,
+                     "value": 0,
+                     "slicing": null
+                  }
+               ]
+            }
+         }
+      ]
+   }
+}
+```
