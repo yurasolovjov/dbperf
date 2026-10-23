@@ -24,7 +24,15 @@ export class ApiError extends Error {
 
 const base = import.meta.env.VITE_API_BASE ?? '/api/v1'
 
+export function postJSON<T>(base: string, path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>(base, path, body, signal)
+}
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>(base, path, body, signal)
+}
+
+async function request<T>(base: string, path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -62,6 +70,11 @@ const int64Keys = new Set([
   'lastSeen',
   'samples',
   'totalSamples',
+  'createdAt',
+  'updatedAt',
+  'revision',
+  'registeredAt',
+  'expiresAt',
 ])
 
 function reviveInt64(this: unknown, key: string, value: unknown): unknown {

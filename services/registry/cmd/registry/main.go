@@ -22,6 +22,7 @@ import (
 
 	registryv1 "github.com/yurasolovjov/dbperf/services/registry/gen/dbperf/registry/v1"
 	api "github.com/yurasolovjov/dbperf/services/registry/internal/api/grpc"
+	apihttp "github.com/yurasolovjov/dbperf/services/registry/internal/api/http"
 	"github.com/yurasolovjov/dbperf/services/registry/internal/store"
 )
 
@@ -54,9 +55,11 @@ func main() {
 	defer st.Close()
 	metrics := api.NewPromMetrics()
 
+	targets := api.NewTargetServer(st, metrics, log.With("component", "targets"))
+	leases := api.NewLeaseServer(st, *ttl, *renew, metrics, log.With("component", "lease"))
 	srv := grpc.NewServer()
-	registryv1.RegisterTargetRegistryServer(srv, api.NewTargetServer(st, metrics, log.With("component", "targets")))
-	registryv1.RegisterLeaseServiceServer(srv, api.NewLeaseServer(st, *ttl, *renew, metrics, log.With("component", "lease")))
+	registryv1.RegisterTargetRegistryServer(srv, targets)
+	registryv1.RegisterLeaseServiceServer(srv, leases)
 	hs := health.NewServer()
 	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthpb.RegisterHealthServer(srv, hs)
@@ -68,6 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 	mux := http.NewServeMux()
+	apihttp.New(targets, leases, log.With("component", "http-api")).Mount(mux)
 	mux.Handle("/metrics", metrics.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	hsrv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

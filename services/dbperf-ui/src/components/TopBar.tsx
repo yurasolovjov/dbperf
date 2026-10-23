@@ -35,7 +35,7 @@ export function TopBar({ targets, targetId, status, onChange }: Props) {
       {target && status && (
         <div className={`status status-${status.state.toLowerCase()}`} title={status.lastError || ''}>
           <span className="dot" />
-          {stateLabel[status.state]}
+          {status.state === 'STATE_UNSPECIFIED' && status.ownerInstance ? `ведёт ${status.ownerInstance}` : stateLabel[status.state]}
           {status.lastSampleAt > 0 && <span className="status-detail">· снимок {fmtDateTime(status.lastSampleAt)}</span>}
           {status.serverVersionNum > 0 && (
             <span className="status-detail">· PostgreSQL {Math.floor(status.serverVersionNum / 10000)}</span>

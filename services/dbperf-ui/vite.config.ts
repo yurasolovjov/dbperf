@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: { '/api': { target: process.env.DBPERF_API ?? 'http://localhost:9091', changeOrigin: true } },
+    proxy: {
+      '/api/v1/registry': { target: process.env.REGISTRY_API ?? 'http://localhost:9101', changeOrigin: true },
+      '/api': { target: process.env.DBPERF_API ?? 'http://localhost:9091', changeOrigin: true },
+    },
   },
   build: {
     outDir: 'dist',

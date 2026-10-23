@@ -16,6 +16,9 @@ service TargetRegistry {
   rpc DeleteTarget(DeleteTargetRequest) returns (google.protobuf.Empty);
   // Stream of changes from a revision; dbperf keeps it open instead of polling ListTargets.
   rpc WatchTargets(WatchTargetsRequest) returns (stream TargetEvent);
+  // Creates many targets in one call (bulk import from a file). Each entry is
+  // validated and created on its own; the response reports every entry.
+  rpc BulkCreateTargets(BulkCreateTargetsRequest) returns (BulkCreateTargetsResponse);
 }
 
 // LeaseService hands targets to dbperf instances and keeps the leases.
@@ -175,4 +178,30 @@ message InstanceAssignments {
 message ListAssignmentsResponse {
   repeated InstanceAssignments instances = 1;
   repeated uint32 unassigned = 2;  // enabled targets without an owner
+}
+
+message BulkCreateTargetsRequest {
+  repeated CreateTargetRequest targets = 1; // <= 5000 per call
+  bool skip_existing = 2;                   // a taken name is SKIPPED instead of FAILED
+}
+
+message BulkCreateResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    CREATED = 1;
+    SKIPPED = 2;
+    FAILED = 3;
+  }
+  int32 index = 1;      // position in the request
+  string name = 2;
+  uint32 target_id = 3; // for CREATED and SKIPPED (the existing id)
+  Status status = 4;
+  string error = 5;     // for FAILED
+}
+
+message BulkCreateTargetsResponse {
+  int32 created = 1;
+  int32 skipped = 2;
+  int32 failed = 3;
+  repeated BulkCreateResult results = 4;
 }

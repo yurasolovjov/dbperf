@@ -16,6 +16,7 @@
 | **dbperf** (изменяется слой 1) | Регистрируется в реестре, берёт цели, продлевает аренду по каждой, отдаёт лишние, следит за изменениями целей | Не знает об etcd |
 | **etcd** | Хранилище с TTL-арендами и транзакциями `compare-and-swap` | — |
 | **registryctl** (CLI в составе реестра) | Импорт `targets.yaml`, список, создание, включение/выключение целей | — |
+| **JSON-шлюз реестра** (`internal/api/http`, порт 9101) | Те же методы `TargetRegistry` и `ListAssignments` для браузера по `POST /api/v1/registry/…`, Nginx фронтенда проксирует этот префикс | — |
 
 Принцип: аренда принадлежит экземпляру dbperf, а не объекту. Если экземпляр перестал
 продлевать — все его цели освобождаются разом, и их разбирают живые экземпляры.
@@ -135,6 +136,23 @@ message TargetEvent {
   int64  revision  = 4;
 }
 ```
+
+**Массовая загрузка** (добавлено после согласования, для импорта из файла через фронтенд):
+
+```protobuf
+  rpc BulkCreateTargets(BulkCreateTargetsRequest) returns (BulkCreateTargetsResponse);
+
+message BulkCreateTargetsRequest { repeated CreateTargetRequest targets = 1; bool skip_existing = 2; } // ≤ 5000
+message BulkCreateResult {
+  enum Status { STATUS_UNSPECIFIED = 0; CREATED = 1; SKIPPED = 2; FAILED = 3; }
+  int32 index = 1; string name = 2; uint32 target_id = 3; Status status = 4; string error = 5;
+}
+message BulkCreateTargetsResponse { int32 created = 1; int32 skipped = 2; int32 failed = 3; repeated BulkCreateResult results = 4; }
+```
+
+Каждая запись создаётся независимо, ответ содержит статус каждой; при `skip_existing` занятое
+имя даёт `SKIPPED` с существующим `target_id`, иначе `FAILED`. YAML разбирает клиент
+(фронтенд или `registryctl`), сервис принимает уже структурированные записи.
 
 Ошибки: `ALREADY_EXISTS` — имя занято; `NOT_FOUND`; `INVALID_ARGUMENT` — поля вне диапазона,
 DSN не разбирается; `FAILED_PRECONDITION` — `expected_revision` не совпала; `ABORTED` —
@@ -390,3 +408,11 @@ services/registry/
 Отличия от первой редакции документа: гистерезис возврата — 5 % без нижнего порога в две
 цели (раздел 4.3); `WatchTargets` реализован на сервере, dbperf пока обновляет список целей
 периодическим `ListTargets` раз в `refresh`.
+
+### 8.1. Фронтенд (23.10.2026)
+
+В `services/dbperf-ui` добавлена страница «Объекты мониторинга» (`#/targets`): таблица объектов с
+владельцем из `ListAssignments`, создание и изменение формой, включение/выключение
+переключателем, удаление с подтверждением, импорт YAML в формате `deploy/dbperf/targets.yaml`
+с предпросмотром, проверкой на клиенте и отправкой `BulkCreateTargets` порциями по 1 000.
+Боковая панель перечисляет все объекты, каждый открывает свой дашборд `#/t/<id>/activity`.

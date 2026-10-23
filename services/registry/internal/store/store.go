@@ -123,32 +123,72 @@ func (s *Store) NextID(ctx context.Context) (uint32, error) {
 }
 
 // Create stores a new target. ID 0 allocates one; a given id must be free.
-// The name must be free too; both checks are one transaction.
+// The name must be free too; both checks are one transaction. Explicit ids
+// (imports) move the counter forward so allocated ids never collide with them.
 func (s *Store) Create(ctx context.Context, t Target) (Target, error) {
-	if t.ID == 0 {
-		id, err := s.NextID(ctx)
+	explicit := t.ID != 0
+	for attempt := 0; attempt < 100; attempt++ {
+		if !explicit {
+			id, err := s.NextID(ctx)
+			if err != nil {
+				return t, err
+			}
+			t.ID = id
+		}
+		now := time.Now().Unix()
+		t.CreatedAt, t.UpdatedAt = now, now
+		data, _ := json.Marshal(t)
+		tx, err := s.cli.Txn(ctx).
+			If(clientv3.Compare(clientv3.CreateRevision(s.nameKey(t.Name)), "=", 0),
+				clientv3.Compare(clientv3.CreateRevision(s.targetKey(t.ID)), "=", 0)).
+			Then(clientv3.OpPut(s.targetKey(t.ID), string(data)),
+				clientv3.OpPut(s.nameKey(t.Name), strconv.FormatUint(uint64(t.ID), 10))).
+			Else(clientv3.OpGet(s.nameKey(t.Name))).
+			Commit()
 		if err != nil {
 			return t, err
 		}
-		t.ID = id
+		if tx.Succeeded {
+			t.Revision = tx.Header.Revision
+			if explicit {
+				s.bumpSeq(ctx, t.ID)
+			}
+			return t, nil
+		}
+		if len(tx.Responses) > 0 && tx.Responses[0].GetResponseRange().GetCount() > 0 {
+			return t, ErrAlreadyExists // the name is taken
+		}
+		if explicit {
+			return t, ErrAlreadyExists // the requested id is taken
+		}
+		// an allocated id collided with an imported one: the counter was behind, retry
 	}
-	now := time.Now().Unix()
-	t.CreatedAt, t.UpdatedAt = now, now
-	data, _ := json.Marshal(t)
-	tx, err := s.cli.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(s.nameKey(t.Name)), "=", 0),
-			clientv3.Compare(clientv3.CreateRevision(s.targetKey(t.ID)), "=", 0)).
-		Then(clientv3.OpPut(s.targetKey(t.ID), string(data)),
-			clientv3.OpPut(s.nameKey(t.Name), strconv.FormatUint(uint64(t.ID), 10))).
-		Commit()
-	if err != nil {
-		return t, err
+	return t, ErrConflict
+}
+
+// bumpSeq raises the id counter to at least id.
+func (s *Store) bumpSeq(ctx context.Context, id uint32) {
+	for attempt := 0; attempt < 10; attempt++ {
+		resp, err := s.cli.Get(ctx, s.seqKey())
+		if err != nil {
+			return
+		}
+		var cur uint64
+		var cmp clientv3.Cmp
+		if len(resp.Kvs) == 0 {
+			cmp = clientv3.Compare(clientv3.CreateRevision(s.seqKey()), "=", 0)
+		} else {
+			cur, _ = strconv.ParseUint(string(resp.Kvs[0].Value), 10, 64)
+			cmp = clientv3.Compare(clientv3.ModRevision(s.seqKey()), "=", resp.Kvs[0].ModRevision)
+		}
+		if cur >= uint64(id) {
+			return
+		}
+		tx, err := s.cli.Txn(ctx).If(cmp).Then(clientv3.OpPut(s.seqKey(), strconv.FormatUint(uint64(id), 10))).Commit()
+		if err != nil || tx.Succeeded {
+			return
+		}
 	}
-	if !tx.Succeeded {
-		return t, ErrAlreadyExists
-	}
-	t.Revision = tx.Header.Revision
-	return t, nil
 }
 
 // Get returns a target by id.

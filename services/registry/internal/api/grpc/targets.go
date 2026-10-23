@@ -192,3 +192,32 @@ func sortedIDs(m map[uint32]struct{}) []uint32 {
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
+
+// BulkCreateTargets creates each entry independently and reports all of them.
+func (s *TargetServer) BulkCreateTargets(ctx context.Context, req *registryv1.BulkCreateTargetsRequest) (*registryv1.BulkCreateTargetsResponse, error) {
+	if n := len(req.GetTargets()); n == 0 || n > 5000 {
+		return nil, status.Error(codes.InvalidArgument, "targets: 1..5000 entries")
+	}
+	resp := &registryv1.BulkCreateTargetsResponse{}
+	for i, in := range req.GetTargets() {
+		r := &registryv1.BulkCreateResult{Index: int32(i), Name: in.GetName()}
+		created, err := s.CreateTarget(ctx, in)
+		switch {
+		case err == nil:
+			r.Status, r.TargetId = registryv1.BulkCreateResult_CREATED, created.GetTargetId()
+			resp.Created++
+		case status.Code(err) == codes.AlreadyExists && req.GetSkipExisting():
+			r.Status = registryv1.BulkCreateResult_SKIPPED
+			if ex, gerr := s.store.GetByName(ctx, in.GetName()); gerr == nil {
+				r.TargetId = ex.ID
+			}
+			resp.Skipped++
+		default:
+			r.Status, r.Error = registryv1.BulkCreateResult_FAILED, status.Convert(err).Message()
+			resp.Failed++
+		}
+		resp.Results = append(resp.Results, r)
+	}
+	s.log.Info("bulk create", "created", resp.Created, "skipped", resp.Skipped, "failed", resp.Failed)
+	return resp, nil
+}

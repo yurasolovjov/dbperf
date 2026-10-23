@@ -20,12 +20,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TargetRegistry_CreateTarget_FullMethodName = "/dbperf.registry.v1.TargetRegistry/CreateTarget"
-	TargetRegistry_GetTarget_FullMethodName    = "/dbperf.registry.v1.TargetRegistry/GetTarget"
-	TargetRegistry_ListTargets_FullMethodName  = "/dbperf.registry.v1.TargetRegistry/ListTargets"
-	TargetRegistry_UpdateTarget_FullMethodName = "/dbperf.registry.v1.TargetRegistry/UpdateTarget"
-	TargetRegistry_DeleteTarget_FullMethodName = "/dbperf.registry.v1.TargetRegistry/DeleteTarget"
-	TargetRegistry_WatchTargets_FullMethodName = "/dbperf.registry.v1.TargetRegistry/WatchTargets"
+	TargetRegistry_CreateTarget_FullMethodName      = "/dbperf.registry.v1.TargetRegistry/CreateTarget"
+	TargetRegistry_GetTarget_FullMethodName         = "/dbperf.registry.v1.TargetRegistry/GetTarget"
+	TargetRegistry_ListTargets_FullMethodName       = "/dbperf.registry.v1.TargetRegistry/ListTargets"
+	TargetRegistry_UpdateTarget_FullMethodName      = "/dbperf.registry.v1.TargetRegistry/UpdateTarget"
+	TargetRegistry_DeleteTarget_FullMethodName      = "/dbperf.registry.v1.TargetRegistry/DeleteTarget"
+	TargetRegistry_WatchTargets_FullMethodName      = "/dbperf.registry.v1.TargetRegistry/WatchTargets"
+	TargetRegistry_BulkCreateTargets_FullMethodName = "/dbperf.registry.v1.TargetRegistry/BulkCreateTargets"
 )
 
 // TargetRegistryClient is the client API for TargetRegistry service.
@@ -41,6 +42,9 @@ type TargetRegistryClient interface {
 	DeleteTarget(ctx context.Context, in *DeleteTargetRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Stream of changes from a revision; dbperf keeps it open instead of polling ListTargets.
 	WatchTargets(ctx context.Context, in *WatchTargetsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TargetEvent], error)
+	// Creates many targets in one call (bulk import from a file). Each entry is
+	// validated and created on its own; the response reports every entry.
+	BulkCreateTargets(ctx context.Context, in *BulkCreateTargetsRequest, opts ...grpc.CallOption) (*BulkCreateTargetsResponse, error)
 }
 
 type targetRegistryClient struct {
@@ -120,6 +124,16 @@ func (c *targetRegistryClient) WatchTargets(ctx context.Context, in *WatchTarget
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TargetRegistry_WatchTargetsClient = grpc.ServerStreamingClient[TargetEvent]
 
+func (c *targetRegistryClient) BulkCreateTargets(ctx context.Context, in *BulkCreateTargetsRequest, opts ...grpc.CallOption) (*BulkCreateTargetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BulkCreateTargetsResponse)
+	err := c.cc.Invoke(ctx, TargetRegistry_BulkCreateTargets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TargetRegistryServer is the server API for TargetRegistry service.
 // All implementations must embed UnimplementedTargetRegistryServer
 // for forward compatibility.
@@ -133,6 +147,9 @@ type TargetRegistryServer interface {
 	DeleteTarget(context.Context, *DeleteTargetRequest) (*emptypb.Empty, error)
 	// Stream of changes from a revision; dbperf keeps it open instead of polling ListTargets.
 	WatchTargets(*WatchTargetsRequest, grpc.ServerStreamingServer[TargetEvent]) error
+	// Creates many targets in one call (bulk import from a file). Each entry is
+	// validated and created on its own; the response reports every entry.
+	BulkCreateTargets(context.Context, *BulkCreateTargetsRequest) (*BulkCreateTargetsResponse, error)
 	mustEmbedUnimplementedTargetRegistryServer()
 }
 
@@ -160,6 +177,9 @@ func (UnimplementedTargetRegistryServer) DeleteTarget(context.Context, *DeleteTa
 }
 func (UnimplementedTargetRegistryServer) WatchTargets(*WatchTargetsRequest, grpc.ServerStreamingServer[TargetEvent]) error {
 	return status.Error(codes.Unimplemented, "method WatchTargets not implemented")
+}
+func (UnimplementedTargetRegistryServer) BulkCreateTargets(context.Context, *BulkCreateTargetsRequest) (*BulkCreateTargetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BulkCreateTargets not implemented")
 }
 func (UnimplementedTargetRegistryServer) mustEmbedUnimplementedTargetRegistryServer() {}
 func (UnimplementedTargetRegistryServer) testEmbeddedByValue()                        {}
@@ -283,6 +303,24 @@ func _TargetRegistry_WatchTargets_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TargetRegistry_WatchTargetsServer = grpc.ServerStreamingServer[TargetEvent]
 
+func _TargetRegistry_BulkCreateTargets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BulkCreateTargetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TargetRegistryServer).BulkCreateTargets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TargetRegistry_BulkCreateTargets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TargetRegistryServer).BulkCreateTargets(ctx, req.(*BulkCreateTargetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TargetRegistry_ServiceDesc is the grpc.ServiceDesc for TargetRegistry service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -309,6 +347,10 @@ var TargetRegistry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTarget",
 			Handler:    _TargetRegistry_DeleteTarget_Handler,
+		},
+		{
+			MethodName: "BulkCreateTargets",
+			Handler:    _TargetRegistry_BulkCreateTargets_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

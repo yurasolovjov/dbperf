@@ -194,3 +194,27 @@ func TestWatch(t *testing.T) {
 		t.Fatalf("delete event: %+v", ev)
 	}
 }
+
+func TestExplicitIDsDoNotCollideWithAllocated(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	if _, err := s.Create(ctx, Target{ID: 1, Name: "imported1", DSN: "postgres://u@h/db", IntervalSec: 10, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, Target{ID: 5, Name: "imported5", DSN: "postgres://u@h/db", IntervalSec: 10, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Create(ctx, Target{Name: "auto", DSN: "postgres://u@h/db", IntervalSec: 10, Enabled: true})
+	if err != nil {
+		t.Fatalf("auto id after imports: %v", err)
+	}
+	if got.ID != 6 {
+		t.Fatalf("expected id 6 after imported 5, got %d", got.ID)
+	}
+	if _, err := s.Create(ctx, Target{ID: 5, Name: "other", DSN: "postgres://u@h/db", IntervalSec: 10, Enabled: true}); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("taken explicit id: %v", err)
+	}
+	if _, err := s.Create(ctx, Target{Name: "auto", DSN: "postgres://u@h/db", IntervalSec: 10, Enabled: true}); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("taken name: %v", err)
+	}
+}
