@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +24,9 @@ import (
 	chsink "github.com/yurasolovjov/dbperf/services/dbperf/internal/sink/clickhouse"
 	"github.com/yurasolovjov/dbperf/services/dbperf/internal/telemetry"
 )
+
+// version is set at build time: -ldflags "-X main.version=…".
+var version = "dev"
 
 func main() {
 	var (
@@ -61,9 +65,16 @@ func run(cfg config.Config) error {
 	}
 	defer conn.Close()
 
-	source, lease, err := buildRegistry(ctx, cfg)
+	source, lease, err := buildRegistry(ctx, cfg, log)
 	if err != nil {
 		return err
+	}
+	renewEvery := cfg.Registry.LeaseRenew
+	if gr, ok := lease.(*registry.GRPCRegistry); ok {
+		defer gr.Close()
+		if iv := gr.RenewInterval(); iv > 0 {
+			renewEvery = iv
+		}
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -77,7 +88,7 @@ func run(cfg config.Config) error {
 		scrapers := scraper.NewManager(cfg.Scraper, sink, status, metrics, log.With("component", "scraper"))
 		manager := &registry.Manager{
 			Source: source, Lease: lease, Instance: cfg.Instance,
-			MaxTargets: cfg.Registry.MaxTargets, Refresh: cfg.Registry.Refresh, Renew: cfg.Registry.LeaseRenew,
+			MaxTargets: cfg.Registry.MaxTargets, Refresh: cfg.Registry.Refresh, Renew: renewEvery,
 			Assignee: scrapers, Log: log.With("component", "registry"),
 		}
 		g.Go(func() error { return sink.Run(ctx) })
@@ -114,7 +125,7 @@ func run(cfg config.Config) error {
 	return err
 }
 
-func buildRegistry(ctx context.Context, cfg config.Config) (registry.TargetSource, registry.Lease, error) {
+func buildRegistry(ctx context.Context, cfg config.Config, log *slog.Logger) (registry.TargetSource, registry.Lease, error) {
 	switch cfg.Registry.Type {
 	case "yaml":
 		src := &registry.YAMLSource{
@@ -137,6 +148,14 @@ func buildRegistry(ctx context.Context, cfg config.Config) (registry.TargetSourc
 			return nil, nil, err
 		}
 		return src, src, nil
+	case "grpc":
+		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		r, err := registry.NewGRPCRegistry(rctx, cfg.Registry.Addr, cfg.Instance, cfg.Registry.MaxTargets, version, log.With("component", "registry-client"))
+		if err != nil {
+			return nil, nil, err
+		}
+		return r, r, nil
 	}
 	return nil, nil, fmt.Errorf("registry type %q", cfg.Registry.Type)
 }

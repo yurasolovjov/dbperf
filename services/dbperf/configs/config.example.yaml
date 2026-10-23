@@ -3,9 +3,10 @@ instance: dbperf-1
 role: all            # collector | api | all
 
 registry:
-  type: yaml         # yaml | postgres
+  type: yaml         # yaml | postgres | grpc
   yaml_path: configs/targets.yaml
   # postgres_dsn: postgres://dbperf:dbperf@meta:5432/dbperf_meta
+  # addr: registry:9100   # dbperf-registry for type grpc; lease_ttl/lease_renew then come from the registry
   max_targets: 5000
   lease_ttl: 60s
   lease_renew: 20s

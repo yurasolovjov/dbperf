@@ -30,11 +30,23 @@ type TargetSource interface {
 }
 
 // Lease assigns targets to instances. Acquire returns the ids this instance
-// now owns (new and already owned), up to want in total.
+// now owns (new and already owned), up to want in total. Renew confirms the
+// ids still owned: anything missing from the result must stop at once.
 type Lease interface {
 	Acquire(ctx context.Context, instance string, want int) ([]uint32, error)
-	Renew(ctx context.Context, instance string, ids []uint32) error
+	Renew(ctx context.Context, instance string, ids []uint32) ([]uint32, error)
 	Release(ctx context.Context, instance string) error
+}
+
+// Deadliner is implemented by leases that expire: after Deadline the instance
+// no longer owns anything and must stop scraping until it reacquires.
+type Deadliner interface {
+	Deadline() time.Time
+}
+
+// OwnerLookup answers who runs a target; implemented by the registry client.
+type OwnerLookup interface {
+	Owner(ctx context.Context, id uint32) (string, error)
 }
 
 // State of a scraper connection.

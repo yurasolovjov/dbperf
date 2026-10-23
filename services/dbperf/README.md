@@ -7,7 +7,7 @@
 
 | Слой | Пакет | Что делает |
 |---|---|---|
-| 1 | `internal/registry` | Список целей из YAML или таблицы `dbperf_targets` в PostgreSQL, аренда целей между экземплярами |
+| 1 | `internal/registry` | Список целей из YAML, таблицы `dbperf_targets` в PostgreSQL или сервиса [dbperf-registry](../registry/README.md) на etcd; аренда целей между экземплярами |
 | 2 | `internal/scraper` | Одно соединение `pgconn` на цель, снимок активных сессий раз в интервал, правило CPU, хэш запроса |
 | 3 | `internal/sink/clickhouse` | Буфер, вставка батчами (5 с / 40 000 строк), ретраи, очередь на 10 батчей |
 | чтение | `internal/query`, `internal/api/grpc` | SQL к ClickHouse с выбором уровня (сырой / минутный), gRPC `TargetService` и `ActivityService` |
@@ -62,7 +62,8 @@ make run       # configs/config.example.yaml, цели из configs/targets.yaml
 ```
 
 Роли: `--role collector` (слои 1–3), `--role api` (только чтение), `--role all`.
-Несколько коллекторов делят цели через `registry.type: postgres` и аренду в `dbperf_targets`.
+Несколько коллекторов делят цели через `registry.type: grpc` (dbperf-registry на etcd, как на стенде)
+или `registry.type: postgres` с арендой в таблице `dbperf_targets`.
 
 ## Нагрузочный тест
 

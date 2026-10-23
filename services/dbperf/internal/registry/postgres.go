@@ -145,16 +145,24 @@ func (s *PostgresSource) Acquire(ctx context.Context, instance string, want int)
 	return ids, nil
 }
 
-// Renew implements Lease.
-func (s *PostgresSource) Renew(ctx context.Context, instance string, ids []uint32) error {
+// Renew implements Lease and returns the ids still owned.
+func (s *PostgresSource) Renew(ctx context.Context, instance string, ids []uint32) ([]uint32, error) {
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	ttl := strconv.Itoa(int(s.LeaseTTL.Seconds()))
-	_, err := s.exec(ctx, `
+	rows, err := s.exec(ctx, `
 		UPDATE dbperf_targets SET lease_until = now() + ($2 || ' seconds')::interval
-		WHERE owner = $1 AND target_id = ANY($3::int[])`, instance, ttl, idArray(ids))
-	return err
+		WHERE owner = $1 AND target_id = ANY($3::int[]) AND enabled
+		RETURNING target_id`, instance, ttl, idArray(ids))
+	if err != nil {
+		return nil, err
+	}
+	owned := make([]uint32, 0, len(rows))
+	for _, r := range rows {
+		owned = append(owned, parseID(r[0]))
+	}
+	return owned, nil
 }
 
 // Release implements Lease: frees every target of the instance so others can

@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package dbperf.registry.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+
+option go_package = "github.com/yurasolovjov/dbperf/services/registry/gen/dbperf/registry/v1;registryv1";
+
+// TargetRegistry stores monitored PostgreSQL databases in etcd.
+service TargetRegistry {
+  rpc CreateTarget(CreateTargetRequest) returns (Target);
+  rpc GetTarget(GetTargetRequest) returns (Target);
+  rpc ListTargets(ListTargetsRequest) returns (ListTargetsResponse);
+  rpc UpdateTarget(UpdateTargetRequest) returns (Target);
+  rpc DeleteTarget(DeleteTargetRequest) returns (google.protobuf.Empty);
+  // Stream of changes from a revision; dbperf keeps it open instead of polling ListTargets.
+  rpc WatchTargets(WatchTargetsRequest) returns (stream TargetEvent);
+}
+
+// LeaseService hands targets to dbperf instances and keeps the leases.
+service LeaseService {
+  // Registers a dbperf instance: opens a session with a TTL. Calling it again
+  // with the same instance replaces the session and frees its targets.
+  rpc RegisterInstance(RegisterInstanceRequest) returns (RegisterInstanceResponse);
+  // Takes free targets, up to want and up to the fair share.
+  rpc AcquireTargets(AcquireTargetsRequest) returns (AcquireTargetsResponse);
+  // Renews the lease for the listed targets; called every renew_interval_sec.
+  rpc RenewLeases(RenewLeasesRequest) returns (RenewLeasesResponse);
+  // Gives targets back before the lease expires: on shutdown or on release_requested.
+  rpc ReleaseTargets(ReleaseTargetsRequest) returns (ReleaseTargetsResponse);
+  // Who owns what: for operators and for dbperf's GetTargetStatus.
+  rpc ListAssignments(ListAssignmentsRequest) returns (ListAssignmentsResponse);
+}
+
+message Target {
+  uint32 target_id = 1;            // assigned by the registry, immutable
+  string name = 2;                 // unique, 1..128 chars of [A-Za-z0-9._-]
+  string dsn = 3;                  // postgres://user:pass@host:5432/db?sslmode=...
+  int32 interval_sec = 4;          // snapshot interval, 1..3600, default 10
+  int32 statement_timeout_ms = 5;  // default 5000
+  bool enabled = 6;                // disabled targets are never leased
+  map<string, string> labels = 7;  // free-form labels: env, cluster, team
+  int64 created_at = 8;            // unix
+  int64 updated_at = 9;            // unix
+  int64 revision = 10;             // etcd revision of the last change, for optimistic updates
+}
+
+message CreateTargetRequest {
+  string name = 1;
+  string dsn = 2;
+  int32 interval_sec = 3;
+  int32 statement_timeout_ms = 4;
+  optional bool enabled = 5;       // absent means true
+  map<string, string> labels = 6;
+  uint32 target_id = 7;            // optional: import keeps ids from a file when they are free
+}
+
+message GetTargetRequest {
+  uint32 target_id = 1;
+  string name = 2;                 // one of the two
+}
+
+message ListTargetsRequest {
+  string name_filter = 1;                 // substring
+  map<string, string> label_selector = 2; // every pair must match
+  optional bool enabled = 3;
+  int32 page_size = 4;                    // <= 1000
+  string page_token = 5;
+}
+
+message ListTargetsResponse {
+  repeated Target targets = 1;
+  string next_page_token = 2;
+  int64 revision = 3;              // etcd revision of the listing; start WatchTargets from it
+}
+
+message UpdateTargetRequest {
+  Target target = 1;                         // target_id required
+  google.protobuf.FieldMask update_mask = 2; // name, dsn, interval_sec, statement_timeout_ms, enabled, labels
+  int64 expected_revision = 3;               // 0 = no check
+}
+
+message DeleteTargetRequest {
+  uint32 target_id = 1;
+}
+
+message WatchTargetsRequest {
+  int64 since_revision = 1;        // 0 = from now
+}
+
+message TargetEvent {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    PUT = 1;
+    DELETE = 2;
+  }
+  Type type = 1;
+  uint32 target_id = 2;
+  Target target = 3;               // empty for DELETE
+  int64 revision = 4;
+}
+
+message RegisterInstanceRequest {
+  string instance = 1;             // unique instance name, e.g. hostname+pid or pod name
+  int32 capacity = 2;              // how many targets the instance can run (max_targets)
+  string version = 3;              // dbperf version, informational
+}
+
+message RegisterInstanceResponse {
+  string session_id = 1;           // passed to every lease call
+  int32 lease_ttl_sec = 2;         // etcd lease TTL, e.g. 30
+  int32 renew_interval_sec = 3;    // recommended RenewLeases period, e.g. 10
+  int32 fair_share = 4;            // current fair share for this instance
+}
+
+message AcquireTargetsRequest {
+  string instance = 1;
+  string session_id = 2;
+  int32 want = 3;                  // how many more to take; capped at fair_share - owned
+}
+
+message Assignment {
+  uint32 target_id = 1;
+  Target target = 2;               // full object, so dbperf needs no second call
+  int64 expires_at = 3;            // unix, when the lease expires without renewal
+}
+
+message AcquireTargetsResponse {
+  repeated Assignment acquired = 1; // taken by this call
+  int32 owned_total = 2;            // targets owned after the call
+  int32 fair_share = 3;
+  int64 lease_deadline_unix = 4;    // RenewLeases must succeed before this moment
+}
+
+message RenewLeasesRequest {
+  string instance = 1;
+  string session_id = 2;
+  repeated uint32 target_ids = 3;  // everything the instance runs right now
+}
+
+message RenewLeasesResponse {
+  repeated uint32 renewed = 1;           // renewed
+  repeated uint32 lost = 2;              // no longer owned (deleted, disabled, taken after expiry): stop their loops
+  repeated uint32 release_requested = 3; // above the fair share: give these back with ReleaseTargets
+  repeated uint32 not_owned_sent = 4;    // sent but unknown to the registry: client bug, stop them
+  int32 fair_share = 5;
+  int64 lease_deadline_unix = 6;
+}
+
+message ReleaseTargetsRequest {
+  string instance = 1;
+  string session_id = 2;
+  repeated uint32 target_ids = 3;
+  bool all = 4;                    // graceful shutdown
+}
+
+message ReleaseTargetsResponse {
+  int32 released = 1;
+}
+
+message ListAssignmentsRequest {
+  string instance = 1;             // empty = all
+}
+
+message InstanceAssignments {
+  string instance = 1;
+  int32 capacity = 2;
+  string version = 3;
+  int64 registered_at = 4;
+  int64 expires_at = 5;
+  repeated uint32 target_ids = 6;
+}
+
+message ListAssignmentsResponse {
+  repeated InstanceAssignments instances = 1;
+  repeated uint32 unassigned = 2;  // enabled targets without an owner
+}

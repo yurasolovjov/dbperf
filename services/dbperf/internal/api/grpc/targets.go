@@ -93,8 +93,13 @@ func (s *targetServer) GetTargetStatus(ctx context.Context, req *dbperfv1.GetTar
 			return out, nil
 		}
 	}
-	// Not owned by this process: the registry knows only that it exists.
+	// Not owned by this process: ask the registry who runs it.
 	out.State = dbperfv1.TargetStatus_STATE_UNSPECIFIED
+	if ol, ok := s.deps.Targets.(registry.OwnerLookup); ok {
+		if owner, err := ol.Owner(ctx, found.ID); err == nil {
+			out.OwnerInstance = owner
+		}
+	}
 	return out, nil
 }
 

@@ -32,9 +32,10 @@ type Config struct {
 
 // Registry configures layer 1: where the list of targets comes from.
 type Registry struct {
-	Type        string        `yaml:"type"` // yaml | postgres
+	Type        string        `yaml:"type"` // yaml | postgres | grpc
 	YAMLPath    string        `yaml:"yaml_path"`
 	PostgresDSN string        `yaml:"postgres_dsn"`
+	Addr        string        `yaml:"addr"` // dbperf-registry gRPC address for type grpc
 	MaxTargets  int           `yaml:"max_targets"`
 	LeaseTTL    time.Duration `yaml:"lease_ttl"`
 	LeaseRenew  time.Duration `yaml:"lease_renew"`
@@ -164,6 +165,10 @@ func (c Config) Validate() error {
 	case "postgres":
 		if c.Registry.PostgresDSN == "" {
 			errs = append(errs, errors.New("registry.postgres_dsn: required for type postgres"))
+		}
+	case "grpc":
+		if c.Registry.Addr == "" {
+			errs = append(errs, errors.New("registry.addr: required for type grpc"))
 		}
 	default:
 		errs = append(errs, fmt.Errorf("registry.type: unknown value %q", c.Registry.Type))

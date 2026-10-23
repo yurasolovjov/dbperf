@@ -1,0 +1,18 @@
+instance: dbperf-2
+role: collector
+registry:
+  type: grpc
+  addr: registry:9100
+  max_targets: 2
+  refresh: 15s
+clickhouse:
+  addrs: ["clickhouse:9000"]
+  database: dbperf
+  user: default
+  flush_interval: 5s
+  flush_rows: 40000
+api:
+  http_addr: ":9091"
+log:
+  level: info
+  format: text

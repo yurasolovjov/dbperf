@@ -1,4 +1,4 @@
-# Test bench: PostgreSQL 16 with pgbench load, ClickHouse, dbperf (collector + API) and the UI behind nginx.
+# Test bench: PostgreSQL 16 with pgbench load, ClickHouse, etcd + dbperf-registry, two dbperf collectors and the UI behind nginx.
 # Usage: make up (repo root): builds the dbperf linux binary and the UI bundle, then docker compose up --build.
 # Images are built from services/dbperf and services/dbperf-ui.
 services:
@@ -51,6 +51,45 @@ services:
       timeout: 3s
       retries: 30
 
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.21
+    command: >
+      etcd --name etcd0 --data-dir /etcd-data
+           --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd:2379
+    volumes:
+      - etcd-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # dbperf-registry: targets and leases in etcd, gRPC :9100, metrics :9101
+  registry:
+    build:
+      context: ../services/registry
+      dockerfile: Dockerfile.prebuilt
+    depends_on:
+      etcd: { condition: service_healthy }
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      ETCD_PREFIX: /dbperf/
+    ports: ["9100:9100", "9101:9101"]
+    restart: unless-stopped
+
+  # one-shot import of the bench targets into the registry
+  registry-init:
+    build:
+      context: ../services/registry
+      dockerfile: Dockerfile.prebuilt
+    depends_on:
+      - registry
+    entrypoint: ["/registryctl"]
+    command: ["-addr", "registry:9100", "import", "-file", "/etc/dbperf/targets.yaml"]
+    volumes:
+      - ./dbperf/targets.yaml:/etc/dbperf/targets.yaml:ro
+    restart: "no"
+
   dbperf:
     build:
       context: ../services/dbperf
@@ -58,12 +97,27 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       clickhouse: { condition: service_healthy }
+      registry-init: { condition: service_completed_successfully }
     environment:
       DBPERF_CONFIG: /etc/dbperf/config.yaml
     volumes:
       - ./dbperf/config.yaml:/etc/dbperf/config.yaml:ro
-      - ./dbperf/targets.yaml:/etc/dbperf/targets.yaml:ro
     ports: ["9090:9090", "9091:9091"]
+    restart: unless-stopped
+
+  # second collector: the registry splits the two bench targets between dbperf-1 and dbperf-2
+  dbperf-2:
+    build:
+      context: ../services/dbperf
+      dockerfile: Dockerfile.prebuilt
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      registry-init: { condition: service_completed_successfully }
+    environment:
+      DBPERF_CONFIG: /etc/dbperf/config.yaml
+    volumes:
+      - ./dbperf/config-2.yaml:/etc/dbperf/config.yaml:ro
     restart: unless-stopped
 
   ui:
@@ -77,3 +131,4 @@ services:
 
 volumes:
   clickhouse-data:
+  etcd-data:

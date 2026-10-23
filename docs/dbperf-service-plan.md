@@ -170,7 +170,12 @@ CREATE TABLE dbperf_targets (
 ```
 
 `Acquire` — один `UPDATE … WHERE lease_until IS NULL OR lease_until < now() … LIMIT want
-FOR UPDATE SKIP LOCKED`, аренда 60 с, продление каждые 20 с. Экземпляр держит не больше
+FOR UPDATE SKIP LOCKED`, аренда 60 с, продление каждые 20 с.
+
+Третья реализация, `registry.type: grpc`, — клиент сервиса dbperf-registry на etcd
+([dbperf-registry-plan.md](dbperf-registry-plan.md)): сессия с TTL, захват и продление по
+списку целей, возврат целей выше справедливой доли, остановка сбора при невозможности продлить
+аренду до дедлайна. На стенде используется она. Экземпляр держит не больше
 `max_targets` (5 000). Статус подключения к каждой цели (аналог `GET /scrapper` в Kintsugi)
 хранится в памяти экземпляра и отдаётся по gRPC `GetTargetStatus`.
 

@@ -1,8 +1,10 @@
 instance: dbperf-1
 role: all
 registry:
-  type: yaml
-  yaml_path: /etc/dbperf/targets.yaml
+  type: grpc
+  addr: registry:9100
+  max_targets: 2        # capacity for failover: one instance can run both bench targets
+  refresh: 15s
 clickhouse:
   addrs: ["clickhouse:9000"]
   database: dbperf

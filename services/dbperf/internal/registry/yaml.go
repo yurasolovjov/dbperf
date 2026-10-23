@@ -103,8 +103,10 @@ func (l *LocalLease) Acquire(ctx context.Context, _ string, want int) ([]uint32,
 	return ids, nil
 }
 
-// Renew implements Lease.
-func (l *LocalLease) Renew(context.Context, string, []uint32) error { return nil }
+// Renew implements Lease: a local lease never loses targets.
+func (l *LocalLease) Renew(_ context.Context, _ string, ids []uint32) ([]uint32, error) {
+	return ids, nil
+}
 
 // Release implements Lease.
 func (l *LocalLease) Release(context.Context, string) error { return nil }

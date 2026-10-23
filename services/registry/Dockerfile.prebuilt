@@ -1,0 +1,6 @@
+# Image from binaries built on the host (make build-linux); used by deploy/docker-compose.yaml.
+FROM scratch
+COPY out/registry /registry
+COPY out/registryctl /registryctl
+EXPOSE 9100 9101
+ENTRYPOINT ["/registry"]

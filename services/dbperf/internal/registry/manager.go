@@ -24,7 +24,9 @@ type Manager struct {
 	Assignee   Assignee
 	Log        *slog.Logger
 
-	owned []uint32
+	owned   []uint32
+	all     []Target
+	stopped bool // lease deadline passed: every loop stopped until reacquired
 }
 
 // Run blocks until ctx is cancelled, then releases the leases.
@@ -44,38 +46,88 @@ func (m *Manager) Run(ctx context.Context) error {
 			}
 			return ctx.Err()
 		case <-renew.C:
-			if err := m.Lease.Renew(ctx, m.Instance, m.owned); err != nil {
-				m.Log.Warn("renew leases", "err", err)
-			}
+			m.renew(ctx)
 		case <-refresh.C:
 			m.refresh(ctx)
 		}
 	}
 }
 
+// renew confirms the owned set; targets the lease no longer confirms stop at
+// once. When the lease has a deadline and renewing failed past it, every
+// loop stops: another instance may own the targets by now.
+func (m *Manager) renew(ctx context.Context) {
+	owned, err := m.Lease.Renew(ctx, m.Instance, m.owned)
+	if err != nil {
+		m.Log.Warn("renew leases", "err", err)
+		m.checkDeadline(ctx)
+		return
+	}
+	sort.Slice(owned, func(i, j int) bool { return owned[i] < owned[j] })
+	changed := !equalIDs(owned, m.owned) || m.stopped
+	m.owned = owned
+	m.stopped = false
+	if changed {
+		m.Log.Info("owned set changed on renew", "owned", len(owned))
+		m.apply(ctx)
+	}
+}
+
+func (m *Manager) checkDeadline(ctx context.Context) {
+	d, ok := m.Lease.(Deadliner)
+	if !ok || m.stopped || d.Deadline().IsZero() || time.Now().Before(d.Deadline()) {
+		return
+	}
+	m.Log.Error("lease deadline passed without renewal, stopping all targets", "deadline", d.Deadline())
+	m.owned = nil
+	m.stopped = true
+	m.apply(ctx)
+}
+
 func (m *Manager) refresh(ctx context.Context) {
 	all, err := m.Source.List(ctx)
 	if err != nil {
 		m.Log.Error("list targets", "err", err)
+		m.checkDeadline(ctx)
 		return
 	}
+	m.all = all
 	ids, err := m.Lease.Acquire(ctx, m.Instance, m.MaxTargets)
 	if err != nil {
 		m.Log.Error("acquire leases", "err", err)
+		m.checkDeadline(ctx)
 		return
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	m.owned = ids
-	own := make(map[uint32]bool, len(ids))
-	for _, id := range ids {
+	m.stopped = false
+	m.apply(ctx)
+}
+
+// apply hands the owned, enabled targets to the scraper.
+func (m *Manager) apply(ctx context.Context) {
+	own := make(map[uint32]bool, len(m.owned))
+	for _, id := range m.owned {
 		own[id] = true
 	}
-	desired := make([]Target, 0, len(ids))
-	for _, t := range all {
+	desired := make([]Target, 0, len(m.owned))
+	for _, t := range m.all {
 		if own[t.ID] && t.Enabled {
 			desired = append(desired, t)
 		}
 	}
-	m.Log.Info("targets refreshed", "total", len(all), "owned", len(desired))
+	m.Log.Info("targets applied", "total", len(m.all), "owned", len(desired))
 	m.Assignee.Apply(ctx, desired)
+}
+
+func equalIDs(a, b []uint32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
