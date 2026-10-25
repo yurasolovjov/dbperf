@@ -28,7 +28,10 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*ProfileResu
 	}
 	minSamples := max(req.MinSamples, 1)
 
-	al := chooseLevel(req.Range, 0, s.maxPoints, s.levels)
+	al, err := s.align(req.Range, 0, s.maxPoints, req.Dimensions, req.Filters)
+	if err != nil {
+		return nil, err
+	}
 	lv := al.level
 	exprs := make([]string, len(req.Dimensions))
 	cols := make([]string, len(req.Dimensions))

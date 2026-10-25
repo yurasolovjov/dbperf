@@ -9,11 +9,18 @@ export interface ApiState<T> {
 
 // useApi runs fn whenever deps change and every refreshSec seconds (0 = off).
 // Stale responses are dropped through AbortController.
-export function useApi<T>(fn: (signal: AbortSignal) => Promise<T>, deps: unknown[], refreshSec: number): ApiState<T> {
+export function useApi<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  deps: unknown[],
+  refreshSec: number,
+  clearOnChange = false,
+  identity?: unknown[],
+): ApiState<T> {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(0)
+  const previousIdentity = useRef<unknown[] | null>(null)
   const ctrl = useRef<AbortController | null>(null)
   const reload = useCallback(() => setTick((t) => t + 1), [])
 
@@ -22,6 +29,13 @@ export function useApi<T>(fn: (signal: AbortSignal) => Promise<T>, deps: unknown
     const c = new AbortController()
     ctrl.current = c
     setLoading(true)
+    const context = identity ?? deps
+    const changed =
+      !previousIdentity.current ||
+      context.length !== previousIdentity.current.length ||
+      context.some((value, i) => value !== previousIdentity.current?.[i])
+    if (clearOnChange && changed) setData(null)
+    previousIdentity.current = [...context]
     fn(c.signal)
       .then((d) => {
         if (c.signal.aborted) return

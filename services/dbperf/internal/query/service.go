@@ -47,7 +47,10 @@ func (s *Service) TimeSeries(ctx context.Context, req TimeSeriesRequest) (*TimeS
 	}
 	limit := clampLimit(req.Slicing.Limit)
 	maxPoints := s.points(req.MaxPoints)
-	al := chooseLevel(req.Range, req.Step, maxPoints, s.levels)
+	al, err := s.align(req.Range, req.Step, maxPoints, []Dimension{req.Slicing.Dim}, req.Filters)
+	if err != nil {
+		return nil, err
+	}
 	expr, err := dimExpr(req.Slicing.Dim, al.level)
 	if err != nil {
 		return nil, err
@@ -163,7 +166,10 @@ func (s *Service) Totals(ctx context.Context, req TotalsRequest) (*TotalsResult,
 	if err := req.Range.Validate(); err != nil {
 		return nil, invalid("%v", err)
 	}
-	al := chooseLevel(req.Range, req.Step, s.points(req.MaxPoints), s.levels)
+	al, err := s.align(req.Range, req.Step, s.points(req.MaxPoints), nil, req.Filters)
+	if err != nil {
+		return nil, err
+	}
 	cond, args, err := where(al.level, req.TargetID, al.rng, req.Filters, req.ExcludeSelf, s.selfApp)
 	if err != nil {
 		return nil, err
@@ -211,14 +217,31 @@ func (s *Service) Top(ctx context.Context, req TopRequest) (*TopResult, error) {
 	if req.Slicing.Dim == DimUnspecified {
 		return nil, invalid("slicing dimension is required")
 	}
+	if _, _, err := metricHaving(req.AAS, req.Percent, 0, 0); err != nil {
+		return nil, err
+	}
 	limit := clampLimit(req.Slicing.Limit)
-	al := chooseLevel(req.Range, 0, s.maxPoints, s.levels)
+	if req.PageSize < 0 || req.PageSize > 100 || req.Offset < 0 || req.Offset > 1000000 {
+		return nil, invalid("invalid pagination")
+	}
+	if req.PageSize > 0 {
+		limit = req.PageSize
+	}
+	allFilters := append(append([]Filter{}, req.Filters...), req.TableFilters...)
+	dims := []Dimension{req.Slicing.Dim}
+	if req.SubSlicing != nil {
+		dims = append(dims, req.SubSlicing.Dim)
+	}
+	al, err := s.align(req.Range, 0, s.maxPoints, dims, allFilters)
+	if err != nil {
+		return nil, err
+	}
 	lv := al.level
 	expr, err := dimExpr(req.Slicing.Dim, lv)
 	if err != nil {
 		return nil, err
 	}
-	cond, args, err := where(lv, req.TargetID, al.rng, req.Filters, req.ExcludeSelf, s.selfApp)
+	cond, args, err := where(lv, req.TargetID, al.rng, allFilters, req.ExcludeSelf, s.selfApp)
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +253,18 @@ func (s *Service) Top(ctx context.Context, req TopRequest) (*TopResult, error) {
 	if err := s.conn.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s", lv.countExpr, lv.activityTable, cond), args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("top total: %w", err)
 	}
-	sql := fmt.Sprintf("SELECT %s AS slice, %s AS n FROM %s WHERE %s GROUP BY slice ORDER BY n DESC, slice LIMIT %d",
-		expr, lv.countExpr, lv.activityTable, cond, limit)
-	rows, err := s.conn.Query(ctx, sql, args...)
+	having, metricArgs, err := metricHaving(req.AAS, req.Percent, nSamples, total)
+	if err != nil {
+		return nil, err
+	}
+	grouped := fmt.Sprintf("SELECT %s AS slice, %s AS n FROM %s WHERE %s GROUP BY slice%s", expr, lv.countExpr, lv.activityTable, cond, having)
+	queryArgs := append(append([]any{}, args...), metricArgs...)
+	var matched uint64
+	if err := s.conn.QueryRow(ctx, "SELECT count() FROM ("+grouped+")", queryArgs...).Scan(&matched); err != nil {
+		return nil, fmt.Errorf("top count: %w", err)
+	}
+	sql := fmt.Sprintf("%s ORDER BY n DESC, slice LIMIT %d OFFSET %d", grouped, limit, req.Offset)
+	rows, err := s.conn.Query(ctx, sql, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("top query: %w", err)
 	}
@@ -261,7 +293,7 @@ func (s *Service) Top(ctx context.Context, req TopRequest) (*TopResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := &TopResult{TotalAAS: ratio(total, nSamples), NSamples: int64(nSamples)}
+	res := &TopResult{MatchedRows: matched, Level: lv.name, TotalAAS: ratio(total, nSamples), NSamples: int64(nSamples)}
 	var topSum uint64
 	for i, r := range top {
 		topSum += r.n
@@ -271,7 +303,7 @@ func (s *Service) Top(ctx context.Context, req TopRequest) (*TopResult, error) {
 			Percent: percent(r.n, total),
 		})
 	}
-	if rem := total - topSum; rem > 0 {
+	if rem := total - topSum; rem > 0 && req.PageSize == 0 && having == "" && req.Offset == 0 {
 		res.Entries = append(res.Entries, TopEntry{
 			Slice:   SliceValue{Value: remainderValue, IsRemainder: true, ID: uint32(len(top) + 1)},
 			AAS:     ratio(rem, nSamples),
@@ -367,7 +399,7 @@ func (s *Service) Sessions(ctx context.Context, req SessionsRequest) (*SessionsR
 	if sampleTS.IsZero() || sampleTS.Unix() <= 0 {
 		return &SessionsResult{}, nil
 	}
-	cond, args, err := where(lv, req.TargetID, Range{Start: sampleTS, End: sampleTS.Add(time.Second)}, req.Filters, false, s.selfApp)
+	cond, args, err := whereAliased(lv, req.TargetID, Range{Start: sampleTS, End: sampleTS.Add(time.Second)}, req.Filters, false, s.selfApp, "a.")
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +409,7 @@ func (s *Service) Sessions(ctx context.Context, req SessionsRequest) (*SessionsR
 	    substring(t.query, 1, 64) AS query_short
 	FROM %s a
 	LEFT JOIN %s.pg_query_texts t ON t.target_id = a.target_id AND t.query_hash = a.query_hash
-	WHERE %s ORDER BY a.pid LIMIT %d`, clientAddrExpr, lv.activityTable, s.db, prefixCond(cond, "a."), limit)
+	WHERE %s ORDER BY a.pid LIMIT %d`, clientAddrExpr, lv.activityTable, s.db, cond, limit)
 	rows, err := s.conn.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sessions query: %w", err)

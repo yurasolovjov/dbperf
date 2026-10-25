@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Dimension } from '../api/types'
+import { DIMENSIONS } from '../api/client'
+const validDimension = (v: string | null) => DIMENSIONS.find(d => d.key === v)?.key
 
 // Hash routes:
 //   #/targets                       — monitoring objects (CRUD, bulk import)
@@ -13,11 +15,11 @@ export function parseRoute(hash: string): Route {
   const m = h.match(/^\/t\/(\d+)\/activity(?:\?(.*))?$/)
   if (m) {
     const q = new URLSearchParams(m[2] ?? '')
-    return { page: 'activity', targetId: Number(m[1]), dim: (q.get('dim') as Dimension) || undefined }
+    return { page: 'activity', targetId: Number(m[1]), dim: validDimension(q.get('dim')) }
   }
   const legacy = new URLSearchParams(h)
   const t = Number(legacy.get('target'))
-  return { page: 'activity', targetId: Number.isFinite(t) ? t : 0, dim: (legacy.get('dim') as Dimension) || undefined }
+  return { page: 'activity', targetId: Number.isFinite(t) ? t : 0, dim: validDimension(legacy.get('dim')) }
 }
 
 export function routeHash(r: Route): string {

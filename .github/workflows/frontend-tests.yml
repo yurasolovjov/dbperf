@@ -1,0 +1,39 @@
+name: Frontend tests
+
+on:
+  pull_request:
+    paths:
+      - 'services/dbperf-ui/**'
+      - '.github/workflows/frontend-tests.yml'
+  push:
+    paths:
+      - 'services/dbperf-ui/**'
+      - '.github/workflows/frontend-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/dbperf-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/dbperf-ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:coverage
+      - run: npm run build
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: services/dbperf-ui/coverage/
+          if-no-files-found: warn

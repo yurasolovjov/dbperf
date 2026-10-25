@@ -19,7 +19,7 @@ export function fmtNum(v: number, digits = 3): string {
 }
 
 export function fmtDateTime(unix: number): string {
-  return new Date(unix * 1000).toLocaleString('ru-RU')
+  return new Date(unix * 1000).toLocaleString('ru-RU', { timeZone: 'Etc/GMT-3' })
 }
 
 export function fmtDuration(seconds: number): string {
