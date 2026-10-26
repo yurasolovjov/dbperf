@@ -1,5 +1,9 @@
+import { fmtNum, sliceLabel } from '../../lib/format'
+import { ChartLoader } from './chart-loader'
 import {
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -7,7 +11,8 @@ import {
 } from 'react'
 import type { Dimension, TimeRange, TimeSeriesResponse } from '../../api/types'
 import { sliceCssColor as sliceColor } from '../../lib/colors'
-import { bucketAreaPath } from './chart-paths'
+import { bucketAreaPath, smoothChartPaths } from './chart-paths'
+import type { ChartMode } from './chart-interpolation'
 import {
   clampSelection,
   moveSelection,
@@ -23,21 +28,32 @@ interface Props {
   compact?: boolean
   totalOnly?: boolean
   label: string
+  loading?: boolean
+  mode?: ChartMode
 }
 const L = 36,
   R = 12,
   T = 8,
   B = 24
 export function BrushChart({
-  data,
-  range,
+  data: incomingData,
+  range: incomingRange,
   selection,
   onChange,
   dimension,
   compact,
   totalOnly,
   label,
+  mode = 'smooth',
+  loading = false,
 }: Props) {
+  const lastResult = useRef<{ data: TimeSeriesResponse; range: TimeRange } | null>(null)
+  useEffect(() => {
+    if (!loading && incomingData) lastResult.current = { data: incomingData, range: incomingData.range }
+  }, [loading, incomingData])
+  // Retain the last completed plot and its time axis while the next request runs.
+  const data = loading ? lastResult.current?.data ?? incomingData : incomingData
+  const range = loading ? lastResult.current?.range ?? incomingRange : incomingRange
   const plotRef = useRef<HTMLDivElement>(null)
   const [{ width: W, height: H }, setSize] = useState({
     width: 1000,
@@ -62,7 +78,32 @@ export function BrushChart({
     preview?: Selection
   } | null>(null)
   const [preview, setPreview] = useState<Selection | null>(null)
-  const [hover, setHover] = useState<number | null>(null)
+  const [hover, setHover] = useState<{ fraction: number; x: number; y: number } | null>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const [tooltipPosition, setTooltipPosition] = useState({ left: 8, top: 8 })
+  useLayoutEffect(() => {
+    if (!hover || !tooltipRef.current || !plotRef.current) return
+    const plot = plotRef.current.getBoundingClientRect()
+    const tip = tooltipRef.current.getBoundingClientRect()
+    const left = hover.x + tip.width + 12 > plot.width ? hover.x - tip.width - 12 : hover.x + 12
+    // Multi-series tooltips may be taller than the compact overview. In that
+    // case let the panel extend beyond the plot while staying in the viewport.
+    const fitsPlot = tip.height + 16 <= plot.height
+    const minTop = fitsPlot ? 8 : 8 - plot.top
+    const maxTop = fitsPlot ? plot.height - tip.height - 8 : window.innerHeight - plot.top - tip.height - 8
+    const top = hover.y + tip.height + 12 > maxTop + tip.height ? hover.y - tip.height - 12 : hover.y + 12
+    setTooltipPosition({
+      left: Math.max(8, Math.min(left, plot.width - tip.width - 8)),
+      top: Math.max(minTop, Math.min(top, maxTop)),
+    })
+  }, [hover, W, H, loading, data, dimension, totalOnly])
+  useEffect(() => {
+    if (loading) {
+      drag.current = null
+      setPreview(null)
+      setHover(null)
+    }
+  }, [loading])
   const current = preview ?? selection
   const max = Math.max(0.1, ...(data?.totals ?? [])) * 1.08
   const span = range.endUnix - range.startUnix
@@ -84,15 +125,17 @@ export function BrushChart({
     })
     return result
   }
+  const smooth = useMemo(() => data && mode === 'smooth'
+    ? smoothChartPaths(data, range, W, H) : null, [data, mode, range, W, H])
   const accumulated = (data?.timestamps ?? []).map(() => 0)
-  const bands = (data?.series ?? []).map((series) => {
+  const bands = (data?.series ?? []).map((series, index) => {
     const bottom = [...accumulated]
     const top = accumulated.map((_, i) => accumulated[i] += series.values[i] ?? 0)
     return {
       key: series.slice.value,
       color: sliceColor(dimension, series.slice),
-      area: bucketAreaPath(data!.timestamps, top, bottom, data!.stepSeconds, range.endUnix, x, y),
-      line: path(top),
+      area: smooth ? smooth.bands[index].area : bucketAreaPath(data!.timestamps, top, bottom, data!.stepSeconds, range.endUnix, x, y),
+      line: smooth ? smooth.bands[index].line : path(top),
     }
   })
   const coordinate = (e: PointerEvent) => {
@@ -146,8 +189,8 @@ export function BrushChart({
       ? -1
       : data.timestamps.reduce(
           (best, t, i) =>
-            Math.abs(t - (range.startUnix + hover * span)) <
-            Math.abs(data.timestamps[best] - (range.startUnix + hover * span))
+            Math.abs(t - (range.startUnix + hover.fraction * span)) <
+            Math.abs(data.timestamps[best] - (range.startUnix + hover.fraction * span))
               ? i
               : best,
           0,
@@ -156,6 +199,7 @@ export function BrushChart({
     <div>
       <div
         ref={plotRef}
+        aria-busy={loading}
         className={`focus-plot ${compact ? 'overview-plot' : 'detail-plot'}`}
       >
         <svg
@@ -163,6 +207,7 @@ export function BrushChart({
           preserveAspectRatio="none"
           role="img"
           aria-label={label}
+          className={`chart-data ${loading ? 'chart-data-loading' : 'chart-data-ready'}`}
         >
           {(compact ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((v) => (
             <g key={v}>
@@ -180,7 +225,7 @@ export function BrushChart({
                 y={y(max * v) + 3}
                 textAnchor="end"
                 fill="var(--muted)"
-                fontSize="9"
+                fontSize="10"
               >
                 {(max * v).toFixed(1)}
               </text>
@@ -192,22 +237,32 @@ export function BrushChart({
           ))}
           {!totalOnly && !compact && bands.map((band) => (
             <path key={`line-${band.key}`} d={band.line} fill="none" stroke={band.color}
-              strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+              strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
           ))}
           <path
-            d={path(data?.totals ?? [])}
+            className="chart-total-line"
+            pathLength={1}
+            d={smooth ? smooth.total : path(data?.totals ?? [])}
             fill="none"
             stroke="var(--chart-total)"
             strokeWidth={compact ? '1.5' : '2.2'}
+            strokeLinejoin="round"
+            strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
           />
+          {!loading && hovered >= 0 && !drag.current && (
+            <line className="chart-crosshair" aria-hidden="true"
+              x1={x(data!.timestamps[hovered])} x2={x(data!.timestamps[hovered])}
+              y1={T} y2={H - B} stroke="var(--chart-crosshair)" strokeWidth="1"
+              strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          )}
           {[0, 0.25, 0.5, 0.75, 1].map((v) => (
             <text
               key={v}
               x={L + v * (W - L - R)}
               y={H - 5}
               textAnchor={v === 0 ? 'start' : v === 1 ? 'end' : 'middle'}
-              fontSize="9"
+              fontSize="10"
               fill="var(--muted)"
             >
               {
@@ -219,16 +274,19 @@ export function BrushChart({
             </text>
           ))}
         </svg>
-        {!data?.timestamps.length && (
+        {loading && <ChartLoader label={label} />}
+        {!loading && !data?.timestamps.length && (
           <div className="chart-empty">Нет снимков за выбранный период</div>
         )}
         <div
           ref={track}
+          hidden={loading}
           className="brush-track"
           onPointerDown={(e) => down(e, 'new')}
           onPointerMove={(e) => {
             move(e)
-            setHover(coordinate(e))
+            const plot = plotRef.current!.getBoundingClientRect()
+            setHover({ fraction: coordinate(e), x: e.clientX - plot.left, y: e.clientY - plot.top })
           }}
           onPointerUp={up}
           onPointerCancel={() => {
@@ -243,7 +301,7 @@ export function BrushChart({
               left: `${current.start * 100}%`,
               width: `${(current.end - current.start) * 100}%`,
             }}
-            tabIndex={0}
+            tabIndex={loading ? -1 : 0}
             role="group"
             aria-label={`${label}: переместить окно`}
             onPointerDown={(e) => down(e, 'move')}
@@ -251,6 +309,7 @@ export function BrushChart({
           >
             <button
               type="button"
+              disabled={loading}
               className="brush-handle start"
               aria-label={`${label}: начало окна`}
               onPointerDown={(e) => down(e, 'start')}
@@ -260,6 +319,7 @@ export function BrushChart({
             </button>
             <button
               type="button"
+              disabled={loading}
               className="brush-handle end"
               aria-label={`${label}: конец окна`}
               onPointerDown={(e) => down(e, 'end')}
@@ -269,15 +329,25 @@ export function BrushChart({
             </button>
           </div>
         </div>
-        {hovered >= 0 && !drag.current && (
-          <div className="plot-tooltip">
-            {
-              rangeLabel({
-                startUnix: data!.timestamps[hovered],
-                endUnix: data!.timestamps[hovered],
-              }).split(' — ')[0]
-            }{' '}
-            · {data!.totals[hovered].toFixed(2)} AAS
+        {!loading && hovered >= 0 && !drag.current && (
+          <div ref={tooltipRef} className="plot-tooltip" role="tooltip"
+            aria-label={`${label}: данные снимка`} style={tooltipPosition}>
+            <div className="tooltip-time">
+              {rangeLabel({ startUnix: data!.timestamps[hovered], endUnix: data!.timestamps[hovered] }).split(' — ')[0]}
+              <span>AAS</span>
+            </div>
+            {!totalOnly && data!.series.map(series => (
+              <div className="tooltip-series-row" key={series.slice.value}>
+                <span className="tooltip-swatch" style={{ background: sliceColor(dimension, series.slice) }} aria-hidden="true" />
+                <span className="tooltip-series-name">{sliceLabel(dimension, series.slice)}</span>
+                <strong>{fmtNum(series.values[hovered] ?? 0)}</strong>
+              </div>
+            ))}
+            <div className="tooltip-series-row tooltip-total">
+              <span className="tooltip-swatch" style={{ background: 'var(--chart-total)' }} aria-hidden="true" />
+              <span>Всего</span>
+              <strong>{fmtNum(data!.totals[hovered])}</strong>
+            </div>
           </div>
         )}
       </div>
@@ -288,6 +358,7 @@ export function BrushChart({
       >
         <button
           type="button"
+          disabled={loading}
           aria-label={`${label}: сдвинуть влево`}
           onClick={() => onChange(moveSelection(selection, 'move', -0.05))}
         >
@@ -295,6 +366,7 @@ export function BrushChart({
         </button>
         <button
           type="button"
+          disabled={loading}
           aria-label={`${label}: уменьшить окно`}
           onClick={() => zoom(0.8)}
         >
@@ -303,6 +375,7 @@ export function BrushChart({
         <span>{Math.round((selection.end - selection.start) * 100)}%</span>
         <button
           type="button"
+          disabled={loading}
           aria-label={`${label}: увеличить окно`}
           onClick={() => zoom(1.25)}
         >
@@ -310,6 +383,7 @@ export function BrushChart({
         </button>
         <button
           type="button"
+          disabled={loading}
           aria-label={`${label}: сдвинуть вправо`}
           onClick={() => onChange(moveSelection(selection, 'move', 0.05))}
         >
@@ -318,6 +392,7 @@ export function BrushChart({
         <button
           type="button"
           className="link"
+          disabled={loading}
           onClick={() => onChange({ start: 0, end: 1 })}
         >
           Весь интервал

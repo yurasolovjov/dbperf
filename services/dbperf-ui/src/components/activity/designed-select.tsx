@@ -1,3 +1,4 @@
+import { SelectChevron } from './select-chevron'
 import { createPortal } from 'react-dom'
 import { popoverContainer, usePopoverPosition } from './use-popover-position'
 import { useEffect, useId, useRef, useState } from 'react'
@@ -104,7 +105,7 @@ export function DesignedSelect({
         }}
       >
         {options.find((x) => x.value === value)?.label ?? label}
-        <span aria-hidden>⌄</span>
+        <SelectChevron />
       </button>
       {open &&
         createPortal(

@@ -1,3 +1,4 @@
+import { SelectChevron } from './activity/select-chevron'
 import { useState } from 'react'
 import type { Dimension } from '../api/types'
 import { DIMENSIONS } from '../api/client'
@@ -95,7 +96,7 @@ export function Controls({
               setCustom(!custom)
             }}
           >
-            Произвольный ⌄
+            Произвольный <SelectChevron />
           </button>
         </div>
         {custom && (
@@ -167,15 +168,17 @@ export function Controls({
         }))}
       />
       <div className="focus-actions">
-        <DesignedSelect
-          label="Автообновление"
-          value={String(refresh)}
-          options={REFRESH.map((r) => ({
-            value: String(r.seconds),
-            label: r.label,
-          }))}
-          onChange={(v) => onRefresh(Number(v))}
-        />
+        <div className="refresh-control">
+          <DesignedSelect
+            label="Автообновление"
+            value={String(refresh)}
+            options={REFRESH.map((r) => ({
+              value: String(r.seconds),
+              label: r.label,
+            }))}
+            onChange={(v) => onRefresh(Number(v))}
+          />
+        </div>
         <button
           type="button"
           className="btn icon-btn"

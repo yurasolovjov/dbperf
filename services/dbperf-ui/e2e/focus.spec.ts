@@ -179,10 +179,18 @@ test('legend repeat click resets it and SQL hashes remain strings', async ({
 }) => {
   const requests = await fixture(page)
   const cpu = page.getByRole('button', { name: 'CPU', exact: true })
+  const filters = page.getByRole('region', {name:'Фильтры дашборда', exact:true})
+  const overview = (await page.locator('.overview-block').boundingBox())!
+  const detail = (await page.locator('.detail-block').boundingBox())!
+  const filterBounds = (await filters.boundingBox())!
+  expect(filterBounds.y).toBeGreaterThanOrEqual(overview.y + overview.height)
+  expect(filterBounds.y + filterBounds.height).toBeLessThanOrEqual(detail.y)
   await cpu.click()
+  await expect(filters).toContainText('Легенда: CPU')
   await expect(cpu).toHaveAttribute('aria-pressed', 'true')
   await cpu.click()
   await expect(cpu).toHaveAttribute('aria-pressed', 'false')
+  await expect(filters).toContainText('Без фильтров')
   await page.getByRole('tab', { name: 'SQL', exact: true }).click()
   await page.locator('.query-link').first().click()
   await expect(page.getByRole('dialog')).toBeVisible()
@@ -351,9 +359,16 @@ for (const size of [
       path: `test-results/focus-${size.width}x${size.height}.png`,
       fullPage: true,
     })
+    expect(await page.locator('.focus-table-head .tabs').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+    await expect(page.locator('.period-context, .analysis-caption')).toHaveCount(0)
+    const chartBounds = (await page.locator('.focus-charts').boundingBox())!
+    const tableBounds = (await page.locator('.focus-table').boundingBox())!
+    expect(tableBounds.y - chartBounds.y - chartBounds.height).toBeGreaterThanOrEqual(0)
+    expect(tableBounds.y - chartBounds.y - chartBounds.height).toBeLessThanOrEqual(16)
     if (size.width >= 1024) {
-      const bounds = (await page.locator('.focus-table').boundingBox())!
+      const bounds = tableBounds
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(size.height)
+      expect(bounds.y + bounds.height).toBeGreaterThanOrEqual(size.height - 35)
     }
     await page.screenshot({
       path: `test-results/focus-${size.width}x${size.height}.png`,
@@ -512,4 +527,172 @@ test('column popovers stay visible above an empty table and inside fullscreen', 
   // The fixture override intentionally returns zero rows; the UI still preserves zero as a real bound.
   await expect(page.locator('.table-filter-bar')).toContainText('AAS: 0')
   expect(requests.some((r) => r.path.endsWith('/top'))).toBe(true)
+})
+
+test('smooth and snapshot modes update both charts while preserving windows and requests', async ({page}) => {
+  const requests = await fixture(page)
+  await page.goto('/#/t/1/activity')
+  await expect(page.locator('.detail-plot .series-area').first()).toBeVisible()
+  const paths = () => page.locator('.focus-plot svg > path:last-of-type').evaluateAll(elements => elements.map(e => e.getAttribute('d')))
+  const windows = () => page.locator('.brush-window').evaluateAll(elements => elements.map(e => e.getAttribute('style')))
+  const smooth = await paths(), selected = await windows()
+  const count = requests.filter(r => r.path.endsWith('/timeseries')).length
+  await expect(page.getByRole('button',{name:'Плавно',exact:true})).toHaveAttribute('aria-pressed','true')
+  await page.getByRole('button',{name:'По снимкам',exact:true}).click()
+  expect((await paths()).every(p => p?.includes(' H'))).toBe(true)
+  await page.getByRole('button',{name:'Плавно',exact:true}).click()
+  expect(await paths()).toEqual(smooth)
+  expect(await windows()).toEqual(selected)
+  expect(requests.filter(r => r.path.endsWith('/timeseries')).length).toBe(count)
+})
+
+test('compact header places PostgreSQL at the right and centers select chevrons', async ({page}) => {
+  await fixture(page)
+  await expect(page.locator('.focus-heading')).toHaveCount(0)
+  await expect(page.locator('.topbar').locator('.focus-badge')).toHaveText('PostgreSQL 16')
+  await expect(page.locator('.topbar')).not.toContainText('тик')
+  const offsets = await page.locator('button > .select-chevron').evaluateAll(icons => icons.map(icon => {
+    const svg = icon.getBoundingClientRect(), button = icon.parentElement!.getBoundingClientRect()
+    return Math.abs(svg.y + svg.height / 2 - button.y - button.height / 2)
+  }))
+  expect(offsets.length).toBeGreaterThanOrEqual(4)
+  expect(offsets.every(offset => offset < 1)).toBe(true)
+})
+
+test('dimension and refresh selectors retain widths and refresh stays with the right actions', async ({page}) => {
+  await fixture(page)
+  const dimension = page.getByRole('button', {name:'Разрез графиков',exact:true})
+  const refresh = page.getByRole('button', {name:'Автообновление',exact:true})
+  const positions = async () => ({dimension:(await dimension.boundingBox())!,refresh:(await refresh.boundingBox())!, actions:(await page.locator('.focus-actions').boundingBox())!})
+  const initial = await positions()
+  for (const label of ['SQL','Базы данных','Типы ожиданий']) {
+    await dimension.click()
+    await page.getByRole('option',{name:label,exact:true}).click()
+    const current = await positions()
+    expect(current.dimension.width).toBe(initial.dimension.width)
+    expect(current.refresh.x).toBe(initial.refresh.x)
+  }
+  for (const label of ['Обновление выкл.','Каждую минуту','Каждые 10 с']) {
+    await refresh.click()
+    await page.getByRole('option',{name:label,exact:true}).click()
+    const current = await positions()
+    expect(current.refresh.width).toBe(initial.refresh.width)
+    expect(current.actions.x).toBe(initial.actions.x)
+  }
+  const controls = (await page.locator('.focus-controls').boundingBox())!
+  expect(initial.actions.x + initial.actions.width).toBeCloseTo(controls.x + controls.width, 0)
+})
+
+test('chart loaders preserve plots while cards and table show skeletons in both themes', async ({page}) => {
+  // Crossing a real second used to shift the retained plot while refreshing.
+  await page.clock.setFixedTime(new Date('2026-10-26T12:00:00Z'))
+  await fixture(page)
+  await expect(page.locator('.focus-charts')).toHaveAttribute('aria-busy','false')
+  await expect.poll(() => page.locator('.focus-plot').evaluateAll(plots => plots.every(plot => {
+    const bounds = plot.getBoundingClientRect(), box = plot.querySelector('svg')!.viewBox.baseVal
+    return Math.abs(box.width - bounds.width) < .5 && Math.abs(box.height - bounds.height) < .5
+  }))).toBe(true)
+  await page.emulateMedia({reducedMotion:'reduce'})
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {release=resolve})
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (['/timeseries','/totals','/targets/status','/top'].some(suffix=>path.endsWith(suffix))) await gate
+    if (path.endsWith('/top')) {
+      await route.fulfill({json:{totalAas:9,nSamples:2,level:'raw',matchedRows:1,entries:[{slice:{value:'Refreshed',shortText:'',id:0,isRemainder:false},aas:9,percent:100,sub:[]}]}})
+      return
+    }
+    await route.fallback()
+  })
+  const oldPath = await page.locator('.detail-plot .chart-total-line').getAttribute('d')
+  await page.clock.setFixedTime(new Date('2026-10-26T12:00:01Z'))
+  await page.getByRole('button',{name:'Обновить данные',exact:true}).click()
+  const loading = page.getByRole('status',{name:'Анализ: загрузка данных'})
+  await expect(loading).toBeVisible()
+  await expect(page.locator('.focus-plot .loading-skeleton')).toHaveCount(0)
+  await expect(page.getByRole('img',{name:'Анализ',exact:true})).toBeVisible()
+  await expect(page.locator('.detail-plot .chart-total-line')).toHaveAttribute('d',oldPath!)
+  await expect(page.locator('.focus-summary .loading-skeleton')).toHaveCount(8)
+  await expect(page.getByText('Нет снимков за выбранный период')).toHaveCount(0)
+  await expect(page.getByRole('status',{name:'Загрузка таблицы',exact:true})).toBeAttached()
+  await expect(page.locator('.table-skeleton-row')).toHaveCount(8)
+  await expect(page.locator('.focus-table tbody .bar')).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Следующая страница',exact:true})).toBeDisabled()
+  const before = await page.locator('.focus-charts').boundingBox()
+  await page.screenshot({path:'test-results/loading-dark.png',fullPage:true})
+  await page.getByRole('button',{name:'Светлая',exact:true}).click()
+  await expect(loading).toBeVisible()
+  await page.screenshot({path:'test-results/loading-light.png',fullPage:true})
+  release()
+  await expect(loading).toHaveCount(0)
+  await expect(page.locator('.focus-summary .loading-skeleton')).toHaveCount(0)
+  await expect(page.locator('.table-skeleton-row')).toHaveCount(0)
+  await expect(page.locator('.focus-table tbody')).toContainText('Refreshed')
+  await expect(page.getByRole('status',{name:'Загрузка таблицы',exact:true})).toHaveCount(0)
+  expect(await page.locator('.focus-charts').boundingBox()).toEqual(before)
+})
+
+test('both chart tooltips follow the pointer, show series and keep the panel on screen', async ({page}) => {
+  await fixture(page)
+  for (const selector of ['.overview-plot','.detail-plot']) {
+    const plot = page.locator(selector), bounds = (await plot.boundingBox())!
+    const tooltip = plot.getByRole('tooltip')
+    await page.mouse.move(bounds.x + 150, bounds.y + 20)
+    await expect(tooltip).toBeVisible()
+    await expect(tooltip.locator('.tooltip-series-row')).toHaveCount(3)
+    await expect(tooltip).toContainText('CPU')
+    await expect(tooltip).toContainText('IO')
+    await expect(tooltip).toContainText('Всего')
+    await expect(tooltip.locator('.tooltip-swatch')).toHaveCount(3)
+    const crosshair = plot.locator('.chart-crosshair')
+    await expect(crosshair).toBeAttached()
+    expect(Number(await crosshair.getAttribute('y2'))).toBeGreaterThan(Number(await crosshair.getAttribute('y1')))
+    const firstX = Number(await crosshair.getAttribute('x1'))
+    const first = (await tooltip.boundingBox())!
+    await page.mouse.move(bounds.x + 350, bounds.y + 40)
+    await expect.poll(async () => (await tooltip.boundingBox())!.x).toBeGreaterThan(first.x + 100)
+    await expect.poll(async () => Number(await crosshair.getAttribute('x1'))).toBeGreaterThan(firstX)
+    for (const point of [{x:bounds.x+40,y:bounds.y+9},{x:bounds.x+bounds.width-14,y:bounds.y+bounds.height-26}]) {
+      await page.mouse.move(point.x,point.y)
+      await expect(tooltip).toBeVisible()
+      await expect.poll(async () => {
+        const tip = (await tooltip.boundingBox())!
+        const viewport = page.viewportSize()!
+        return tip.x >= bounds.x && tip.y >= 0 && tip.x + tip.width <= bounds.x + bounds.width && tip.y + tip.height <= viewport.height
+      }).toBe(true)
+    }
+    await page.mouse.move(bounds.x + 400,bounds.y + 20)
+    await page.screenshot({path:`test-results/tooltip-${selector.slice(1)}.png`,fullPage:true})
+    await page.mouse.move(0,0)
+    await expect(tooltip).toHaveCount(0)
+    await expect(crosshair).toHaveCount(0)
+  }
+})
+
+test('chart tooltip uses project surfaces and contrasting crosshairs with arrow cursors in both themes', async ({page}) => {
+  await fixture(page)
+  for (const theme of [{name:'Тёмная',dark:true},{name:'Светлая',dark:false}]) {
+    await page.getByRole('button',{name:theme.name,exact:true}).click()
+    for (const selector of ['.overview-plot','.detail-plot']) {
+      const plot=page.locator(selector),bounds=(await plot.boundingBox())!
+      await page.mouse.move(bounds.x+300,bounds.y+20)
+      const tooltip=plot.getByRole('tooltip')
+      await expect(tooltip).toBeVisible()
+      const appearance=await tooltip.evaluate(el=>{
+        const style=getComputedStyle(el),root=getComputedStyle(document.documentElement)
+        const stroke=getComputedStyle(el.closest('.focus-plot')!.querySelector('.chart-crosshair')!).stroke
+        return {background:style.backgroundColor,text:style.color,border:style.borderTopStyle,expectedSurface:root.getPropertyValue('--surface-raised').trim(),stroke}
+      })
+      const channels=appearance.stroke.match(/[\d.]+/g)!.map(Number)
+      expect(channels.slice(0,3).reduce((sum,n)=>sum+n,0)/3 > 128).toBe(theme.dark)
+      const surfaceRGB = `rgb(${appearance.expectedSurface.match(/[0-9a-f]{2}/gi)!.map(hex=>parseInt(hex,16)).join(', ')})`
+      expect(appearance.background).toBe(surfaceRGB)
+      expect(appearance.background).not.toBe(appearance.text)
+      expect(appearance.border).toBe('solid')
+      await expect(plot.locator('.brush-track')).toHaveCSS('cursor','default')
+      await expect(plot.locator('.brush-window')).toHaveCSS('cursor','default')
+      await expect(plot.locator('.brush-handle').first()).toHaveCSS('cursor','default')
+    }
+    await page.screenshot({path:`test-results/tooltip-theme-${theme.dark?'dark':'light'}.png`,fullPage:true})
+  }
 })

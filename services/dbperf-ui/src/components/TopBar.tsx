@@ -1,6 +1,5 @@
 import { DesignedSelect } from './activity/designed-select'
 import type { Target, TargetStatus } from '../api/types'
-import { fmtDateTime } from '../lib/format'
 
 interface Props {
   targets: Target[]
@@ -34,26 +33,12 @@ export function TopBar({ targets, targetId, status, onChange }: Props) {
         <span className="crumb-current">Активность сессии</span>
       </div>
       {target && status && (
-        <div
-          className={`status status-${status.state.toLowerCase()}`}
-          title={status.lastError || ''}
+        <span
+          className="focus-badge"
+          title={status.lastError || `${stateLabel[status.state]} · ${status.ownerInstance || 'сборщик не назначен'} · тик ${target.intervalSec} с`}
         >
-          <span className="dot" />
-          {status.state === 'STATE_UNSPECIFIED' && status.ownerInstance
-            ? `ведёт ${status.ownerInstance}`
-            : stateLabel[status.state]}
-          {status.lastSampleAt > 0 && (
-            <span className="status-detail">
-              · снимок {fmtDateTime(status.lastSampleAt)}
-            </span>
-          )}
-          {status.serverVersionNum > 0 && (
-            <span className="status-detail">
-              · PostgreSQL {Math.floor(status.serverVersionNum / 10000)}
-            </span>
-          )}
-          <span className="status-detail">· тик {target.intervalSec} с</span>
-        </div>
+          PostgreSQL{status.serverVersionNum > 0 ? ` ${Math.floor(status.serverVersionNum / 10000)}` : ''}
+        </span>
       )}
     </header>
   )

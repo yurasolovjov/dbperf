@@ -122,3 +122,42 @@ it('brush moves/resizes by keyboard and pointer, cancels drag and reports hover'
  fireEvent.pointerDown(track,{clientX:100,button:0});fireEvent.pointerMove(track,{clientX:200});fireEvent.pointerCancel(track)
  rerender(<BrushChart {...props} compact totalOnly data={null}/>);expect(screen.getByText(/Нет снимков/)).toBeVisible()
 })
+
+it('retains the previous chart and axis while a changed range loads, then reveals the new result',()=>{
+ const props={data:series,range:series.range,selection:{start:.2,end:.8},onChange:noop,dimension:'WAIT_EVENT_TYPE' as const,label:'Retained'}
+ const {container,rerender}=render(<BrushChart {...props}/>), path=()=>container.querySelector('.chart-total-line')!.getAttribute('d')
+ const previous=path()
+ // The parent advances its range before the request effect sets loading=true.
+ // Preserve the returned data range, not this transient new requested range.
+ rerender(<BrushChart {...props} range={{startUnix:101,endUnix:161}}/>)
+ rerender(<BrushChart {...props} data={null} range={{startUnix:101,endUnix:161}} loading/> )
+ expect(path()).toBe(previous)
+ expect(screen.getByRole('status',{name:'Retained: загрузка данных'})).toBeVisible()
+ expect(screen.getByRole('img',{name:'Retained'})).toBeVisible()
+ expect(container.querySelector('.loading-skeleton')).toBeNull()
+ const next={...series,totals:series.totals.map(v=>v+2),series:series.series.map((s,i)=>({...s,values:s.values.map(v=>v+(i===0?2:0))}))}
+ rerender(<BrushChart {...props} data={next}/>)
+ expect(path()).not.toBe(previous)
+ expect(screen.queryByRole('status',{name:'Retained: загрузка данных'})).toBeNull()
+})
+
+it('shows raw values and matching colors for every visible series with a snapped crosshair',()=>{
+ const props={data:series,range:series.range,selection:{start:.2,end:.8},onChange:noop,dimension:'WAIT_EVENT_TYPE' as const,label:'Values'}
+ const {container,rerender}=render(<BrushChart {...props}/>),track=container.querySelector('.brush-track')!
+ vi.spyOn(track,'getBoundingClientRect').mockReturnValue({left:0,width:1000} as DOMRect)
+ fireEvent.pointerMove(track,{clientX:500,clientY:40})
+ const rows=()=>Array.from(screen.getByRole('tooltip').querySelectorAll('.tooltip-series-row'))
+ expect(rows().map(row=>row.querySelector('strong')!.textContent)).toEqual(['1','1','2'])
+ expect(rows().map(row=>row.textContent)).toEqual(['CPU1','IO1','Всего2'])
+ expect(rows()[0].querySelector('.tooltip-swatch')).toHaveStyle({background:'var(--wait-cpu)'})
+ expect(rows()[1].querySelector('.tooltip-swatch')).toHaveStyle({background:'var(--wait-io)'})
+ const first=container.querySelector('.chart-crosshair')!.getAttribute('x1')
+ fireEvent.pointerMove(track,{clientX:100,clientY:40})
+ expect(container.querySelector('.chart-crosshair')!.getAttribute('x1')).not.toBe(first)
+ rerender(<BrushChart {...props} totalOnly/>)
+ expect(rows()).toHaveLength(1)
+ expect(rows()[0]).toHaveTextContent('Всего')
+ fireEvent.pointerLeave(track)
+ expect(screen.queryByRole('tooltip')).toBeNull()
+ expect(container.querySelector('.chart-crosshair')).toBeNull()
+})

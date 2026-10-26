@@ -79,7 +79,7 @@ it('fullscreen supports native entry, browser change, exit, fallback and Escape'
 })
 it('displays failures and retries without hiding the entire dashboard',async()=>{
  vi.mocked(api.timeSeries).mockRejectedValue(new Error('timeseries failed'))
- render(<Dashboard/>);await screen.findByRole('alert');expect(screen.getByRole('heading',{name:'Активность сессий'})).toBeVisible()
+ render(<Dashboard/>);await screen.findByRole('alert');expect(screen.getByRole('banner')).toBeVisible()
  vi.mocked(api.timeSeries).mockResolvedValue(series);fireEvent.click(screen.getByRole('button',{name:'Повторить'}));await loaded();expect(screen.queryByRole('alert')).toBeNull()
  vi.mocked(api.profile).mockRejectedValue(new Error('profile failed'));fireEvent.click(screen.getByRole('button',{name:'Профиль'}));await screen.findByRole('alert')
 })
@@ -102,5 +102,46 @@ it('App routes through sidebar, topbar target select and dimension URL replaceme
  fireEvent.click(screen.getByRole('button',{name:'Объект мониторинга'}));fireEvent.click(screen.getByRole('option',{name:'replica'}));await waitFor(()=>expect(location.hash).toContain('/t/2/'))
  fireEvent.click(screen.getByRole('link',{name:/Объекты мониторинга/}));await screen.findByRole('button',{name:/Создать/})
  fireEvent.click(screen.getByRole('button',{name:/Создать/}));fireEvent.change(screen.getByLabelText('Имя'),{target:{value:'new'}});vi.spyOn(registry,'create').mockResolvedValue(target);fireEvent.click(screen.getByRole('button',{name:'Создать'}));await waitFor(()=>expect(screen.queryByText('Новый объект мониторинга')).toBeNull())
- fireEvent.click(screen.getAllByRole('button',{name:'Дашборд'})[0]);await screen.findByRole('heading',{name:'Активность сессий'})
+ fireEvent.click(screen.getAllByRole('button',{name:'Дашборд'})[0]);await screen.findByRole('banner')
+})
+
+it('switches both charts together without changing requests, filters or the selected windows', async () => {
+  const {container} = render(<Dashboard/>); await loaded()
+  const paths = () => Array.from(container.querySelectorAll('.focus-plot svg > path:last-of-type')).map(p => p.getAttribute('d'))
+  const windows = () => Array.from(container.querySelectorAll('.brush-window')).map(w => w.getAttribute('style'))
+  const smooth = paths(), selection = windows(), requests = vi.mocked(api.timeSeries).mock.calls.length
+  expect(screen.getByRole('button',{name:'Плавно'})).toHaveAttribute('aria-pressed','true')
+  fireEvent.click(screen.getByRole('button',{name:'По снимкам'}))
+  expect(screen.getByRole('button',{name:'По снимкам'})).toHaveAttribute('aria-pressed','true')
+  expect(paths()).not.toEqual(smooth)
+  expect(paths().every(p => p?.includes(' H'))).toBe(true)
+  fireEvent.click(screen.getByRole('button',{name:'Плавно'}))
+  expect(paths()).toEqual(smooth)
+  expect(windows()).toEqual(selection)
+  expect(vi.mocked(api.timeSeries)).toHaveBeenCalledTimes(requests)
+})
+
+it('shows chart loaders and card skeletons until data arrives', async () => {
+ let resolveSeries!: (value:typeof series)=>void
+ let resolveTotals!: (value:{stepSeconds:number;timestamps:number[];values:number[];average:number})=>void
+ let resolveStatus!: (value:typeof status)=>void
+ vi.mocked(api.timeSeries).mockReturnValue(new Promise(resolve=>{resolveSeries=resolve}))
+ vi.mocked(api.totals).mockReturnValue(new Promise(resolve=>{resolveTotals=resolve}))
+ vi.mocked(api.targetStatus).mockReturnValue(new Promise(resolve=>{resolveStatus=resolve}))
+ const {container}=render(<Dashboard/>)
+ await screen.findByRole('status',{name:'Обзор: загрузка данных'})
+ expect(screen.getByRole('status',{name:'Анализ: загрузка данных'})).toBeVisible()
+ expect(container.querySelectorAll('.focus-plot .loading-skeleton')).toHaveLength(0)
+ expect(screen.getByRole('img',{name:'Анализ'})).toBeVisible()
+ expect(container.querySelectorAll('.focus-summary [aria-busy="true"]')).toHaveLength(4)
+ expect(container.querySelectorAll('.focus-summary .loading-skeleton')).toHaveLength(8)
+ expect(container.querySelectorAll('.focus-summary small .loading-skeleton')).toHaveLength(4)
+ expect(container.querySelector('.focus-summary')?.textContent).not.toContain('AAS')
+ expect(screen.queryByText('Нет снимков за выбранный период')).toBeNull()
+ expect(screen.getByRole('button',{name:'Анализ: начало окна',hidden:true})).toBeDisabled()
+ resolveSeries(series);resolveTotals({stepSeconds:10,timestamps:[100],values:[2,3],average:2.5});resolveStatus(status)
+ await waitFor(()=>expect(container.querySelectorAll('.loading-skeleton')).toHaveLength(0))
+ expect(screen.getByRole('img',{name:'Анализ'})).toBeVisible()
+ expect(screen.getByText('2.50')).toBeVisible()
+ expect(screen.getByRole('button',{name:'Анализ: начало окна'})).toBeEnabled()
 })

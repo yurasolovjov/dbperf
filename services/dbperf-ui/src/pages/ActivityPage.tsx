@@ -1,3 +1,4 @@
+import { Skeleton } from '../components/activity/skeleton'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, DIMENSIONS } from '../api/client'
 import { registry } from '../api/registry'
@@ -7,6 +8,7 @@ import { DimensionOrder } from '../components/DimensionOrder'
 import { QueryModal } from '../components/QueryModal'
 import { TopBar } from '../components/TopBar'
 import { TopTable, type Unit } from '../components/TopTable'
+import type { ChartMode } from '../components/activity/chart-interpolation'
 import { BrushChart } from '../components/activity/brush-chart'
 import { ProfileView } from '../components/activity/profile-view'
 import {
@@ -16,7 +18,7 @@ import {
   type Selection,
 } from '../components/activity/range-model'
 import { sliceCssColor as sliceColor } from '../lib/colors'
-import { fmtDateTime, sliceLabel } from '../lib/format'
+import { sliceLabel } from '../lib/format'
 import { useApi } from '../lib/useApi'
 const CLIENT: Filter = { dimension: 'BACKEND_TYPE', values: ['client backend'] }
 interface Props {
@@ -51,6 +53,7 @@ export function ActivityPage({
     [fullscreen, setFullscreen] = useState(false)
   const [unit, setUnit] = useState<Unit>('PERCENT'),
     [queryHash, setQueryHash] = useState<string | null>(null)
+  const [chartMode, setChartMode] = useState<ChartMode>('smooth')
   const [view, setView] = useState<'chart' | 'profile'>('chart')
   const [profileOrder, setProfileOrder] = useState<Dimension[]>([
     'QUERY',
@@ -328,13 +331,6 @@ export function ActivityPage({
         status={status.data}
         onChange={onTargetChange}
       />
-      <div className="focus-heading">
-        <div>
-          <p className="eyebrow">МОНИТОРИНГ POSTGRESQL</p>
-          <h1>Активность сессий</h1>
-        </div>
-        <span className="focus-badge">PostgreSQL</span>
-      </div>
       <Controls
         period={period}
         onPeriod={(p) => {
@@ -356,13 +352,6 @@ export function ActivityPage({
         onFullscreen={toggleFullscreen}
         fullscreen={fullscreen}
       />
-      <div className="period-context">
-        {fmtDateTime(range.startUnix)} — {fmtDateTime(range.endUnix)} · UTC+3{' '}
-        <span role="status">
-          {loading ? 'Обновляем данные…' : 'Данные обновлены'}
-          {fullscreen ? ' · Полный экран' : ''}
-        </span>
-      </div>
       {errors.map((e) => (
         <div className="error" role="alert" key={e}>
           {e}{' '}
@@ -378,39 +367,39 @@ export function ActivityPage({
         </div>
       )}
       <div className="focus-summary grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div>
+        <div aria-busy={totals.loading}>
           <span>Средняя активность</span>
-          <strong>{totals.data?.average.toFixed(2) ?? '—'}</strong>
-          <small>AAS</small>
+          <strong>{totals.loading ? <Skeleton /> : totals.data?.average.toFixed(2) ?? '—'}</strong>
+          <small>{totals.loading ? <Skeleton /> : 'AAS'}</small>
         </div>
-        <div>
+        <div aria-busy={totals.loading}>
           <span>Пик по снимкам</span>
           <strong>
-            {totals.data?.values.length
+            {totals.loading ? <Skeleton /> : totals.data?.values.length
               ? Math.max(...totals.data.values).toFixed(2)
               : '—'}
           </strong>
-          <small>AAS · шаг {totals.data?.stepSeconds ?? '—'} с</small>
+          <small>{totals.loading ? <Skeleton wide /> : <>AAS · шаг {totals.data?.stepSeconds ?? '—'} с</>}</small>
         </div>
-        <div>
+        <div aria-busy={totals.loading}>
           <span>Интервал анализа</span>
           <strong>
-            {Math.round(((analyzed.endUnix - analyzed.startUnix) / 60) * 10) /
+            {totals.loading ? <Skeleton /> : Math.round(((analyzed.endUnix - analyzed.startUnix) / 60) * 10) /
               10}
           </strong>
-          <small>минут</small>
+          <small>{totals.loading ? <Skeleton /> : 'минут'}</small>
         </div>
-        <div>
+        <div aria-busy={status.loading}>
           <span>Последний снимок</span>
           <strong>
-            {status.data?.lastSampleAt
+            {status.loading ? <Skeleton wide /> : status.data?.lastSampleAt
               ? rangeLabel({
                   startUnix: status.data.lastSampleAt,
                   endUnix: status.data.lastSampleAt,
                 }).split(' — ')[0]
               : '—'}
           </strong>
-          <small>{top.data?.level ?? '—'}</small>
+          <small>{status.loading ? <Skeleton /> : top.data?.level ?? '—'}</small>
         </div>
       </div>
       <section
@@ -428,6 +417,8 @@ export function ActivityPage({
           </div>
           <BrushChart
             label="Обзор"
+            loading={overview.loading}
+            mode={chartMode}
             data={overview.data}
             range={range}
             selection={focus}
@@ -436,31 +427,111 @@ export function ActivityPage({
             compact
           />
         </div>
+        <section className="dashboard-filter-row" aria-label="Фильтры дашборда">
+          <div className="filters"><span className="data-filter-label">Фильтры данных</span>
+            {!globalFilters.length && !legend && (
+              <span className="muted">Без фильтров</span>
+            )}
+            {globalFilters.map((f, i) => (
+              <span className="chip" key={f.dimension}>
+                <span>
+                  {DIMENSIONS.find((d) => d.key === f.dimension)?.label ??
+                    f.dimension}
+                  : {f.values.join(', ')}
+                </span>
+                <button
+                  type="button"
+                  className="chip-x"
+                  aria-label={`Убрать общий фильтр ${f.dimension}`}
+                  onClick={() =>
+                    setGlobalFilters((fs) => fs.filter((_, j) => i !== j))
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {legend && (
+              <span className="chip">
+                Легенда: {legend}
+                <button
+                  type="button"
+                  className="chip-x"
+                  aria-label="Сбросить легенду"
+                  onClick={() => setLegend(null)}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            {(globalFilters.length > 0 || legend) && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setGlobalFilters([])
+                  setLegend(null)
+                }}
+              >
+                Сбросить всё
+              </button>
+            )}
+          </div>
+          <div className="chart-options">
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={totalOnly}
+                onChange={(e) => setTotalOnly(e.target.checked)}
+              />
+              Только всего
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={background}
+                onChange={(e) => setBackground(e.target.checked)}
+              />
+              Фоновые процессы
+            </label>
+          </div>
+        </section>
         <div className="detail-block">
           <div className="detail-title-row">
             <h2>
               <span className="detail-mark" />
               Анализ активности <small>AAS</small>
             </h2>
-            <div
-              className="view-toggle"
-              role="group"
-              aria-label="Вид активности"
-            >
-              <button
-                type="button"
-                className={`btn small ${view === 'chart' ? 'active' : ''}`}
-                onClick={() => setView('chart')}
+            <div className="chart-view-controls">
+              <div className="view-toggle chart-mode-toggle" role="group" aria-label="Отображение графиков">
+                {(['smooth', 'snapshots'] as const).map(mode => (
+                  <button key={mode} type="button" aria-pressed={chartMode === mode}
+                    className={`btn small ${chartMode === mode ? 'active' : ''}`}
+                    onClick={() => setChartMode(mode)}>
+                    {mode === 'smooth' ? 'Плавно' : 'По снимкам'}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="view-toggle"
+                role="group"
+                aria-label="Вид активности"
               >
-                График
-              </button>
-              <button
-                type="button"
-                className={`btn small ${view === 'profile' ? 'active' : ''}`}
-                onClick={() => setView('profile')}
-              >
-                Профиль
-              </button>
+                <button
+                  type="button"
+                  className={`btn small ${view === 'chart' ? 'active' : ''}`}
+                  onClick={() => setView('chart')}
+                >
+                  График
+                </button>
+                <button
+                  type="button"
+                  className={`btn small ${view === 'profile' ? 'active' : ''}`}
+                  onClick={() => setView('profile')}
+                >
+                  Профиль
+                </button>
+              </div>
             </div>
           </div>
           <div className="detail-toolbar">
@@ -505,6 +576,8 @@ export function ActivityPage({
           ) : (
             <BrushChart
               label="Анализ"
+              loading={detail.loading}
+              mode={chartMode}
               data={detail.data}
               range={win}
               selection={analysis}
@@ -513,80 +586,7 @@ export function ActivityPage({
               totalOnly={totalOnly}
             />
           )}
-          <div className="analysis-caption">
-            <span className="selection-dot" />
-            Интервал анализа <strong>{rangeLabel(analyzed)}</strong>
-            <span className="muted">для показателей и таблицы</span>
-          </div>
-          <div className="dashboard-filter-row">
-            <div className="filters"><span className="data-filter-label">Фильтры данных</span>
-              {!globalFilters.length && !legend && (
-                <span className="muted">Без фильтров</span>
-              )}
-              {globalFilters.map((f, i) => (
-                <span className="chip" key={f.dimension}>
-                  <span>
-                    {DIMENSIONS.find((d) => d.key === f.dimension)?.label ??
-                      f.dimension}
-                    : {f.values.join(', ')}
-                  </span>
-                  <button
-                    type="button"
-                    className="chip-x"
-                    aria-label={`Убрать общий фильтр ${f.dimension}`}
-                    onClick={() =>
-                      setGlobalFilters((fs) => fs.filter((_, j) => i !== j))
-                    }
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              {legend && (
-                <span className="chip">
-                  Легенда: {legend}
-                  <button
-                    type="button"
-                    className="chip-x"
-                    aria-label="Сбросить легенду"
-                    onClick={() => setLegend(null)}
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              {(globalFilters.length > 0 || legend) && (
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => {
-                    setGlobalFilters([])
-                    setLegend(null)
-                  }}
-                >
-                  Сбросить всё
-                </button>
-              )}
-            </div>
-            <div className="chart-options">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={totalOnly}
-                  onChange={(e) => setTotalOnly(e.target.checked)}
-                />
-                Только всего
-              </label>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={background}
-                  onChange={(e) => setBackground(e.target.checked)}
-                />
-                Фоновые процессы
-              </label>
-            </div>
-          </div>
+
         </div>
       </section>
       <TopTable

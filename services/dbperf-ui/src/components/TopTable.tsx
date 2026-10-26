@@ -1,3 +1,4 @@
+import { Skeleton } from './activity/skeleton'
 import { Fragment, useState } from 'react'
 import type { Dimension, TableFilters, TopResponse } from '../api/types'
 import { DIMENSIONS } from '../api/client'
@@ -149,11 +150,12 @@ export function TopTable({
           </button>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div role="alert" className="error">
           {error}
         </div>
       )}
+      {loading && <span className="sr-only" role="status" aria-label="Загрузка таблицы">Загружаем активность…</span>}
       <div className="focus-table-scroll">
         <table className="top-table">
           <thead>
@@ -198,6 +200,14 @@ export function TopTable({
             </tr>
           </thead>
           <tbody>
+            {loading ? Array.from({ length: Math.max(1, Math.min(pageSize, data?.entries.length || pageSize)) }, (_, index) => (
+              <tr className="table-skeleton-row" key={index} aria-hidden="true">
+                <td />
+                <td><Skeleton wide /></td>
+                <td className="col-label"><Skeleton wide /></td>
+                <td className="col-metric"><Skeleton /></td>
+              </tr>
+            )) : <>
             {(data?.entries ?? []).map((e) => {
               const key = `${dimension}:${e.slice.value}`,
                 label = sliceLabel(dimension, e.slice)
@@ -285,25 +295,24 @@ export function TopTable({
             {!data?.entries.length && (
               <tr>
                 <td colSpan={4} className="center muted">
-                  {loading
-                    ? 'Загружаем активность…'
-                    : error
+                  {error
                       ? 'Данные недоступны'
                       : 'Нет значений за этот интервал с выбранными фильтрами'}
                 </td>
               </tr>
             )}
+            </>}
           </tbody>
         </table>
       </div>
       <div className="focus-table-footer">
         <span>
-          Всего {fmtNum(data?.totalAas ?? 0)} AAS · снимков{' '}
-          {data?.nSamples ?? 0} · {data?.level ?? '—'}
+          {loading ? <Skeleton wide /> : <>Всего {fmtNum(data?.totalAas ?? 0)} AAS · снимков{' '}
+          {data?.nSamples ?? 0} · {data?.level ?? '—'}</>}
         </span>
         <div className="row">
           <span>
-            {data?.matchedRows
+            {loading ? <Skeleton /> : data?.matchedRows
               ? `${offset + 1}–${Math.min(offset + pageSize, data.matchedRows)} из ${data.matchedRows}`
               : '0 строк'}
           </span>
