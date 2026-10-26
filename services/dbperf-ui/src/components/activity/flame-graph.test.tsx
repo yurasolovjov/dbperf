@@ -42,7 +42,8 @@ it('search returns matching nodes without their matching descendants', () => {
 it('selects, filters, opens SQL, zooms by double click and resets with Escape', () => {
   const onFilter = vi.fn(), onQuery = vi.fn()
   const { container } = render(<FlameGraph data={profile} dimensions={[...dims]} onFilter={onFilter} onQuery={onQuery} />)
-  expect(container.querySelectorAll('.flame-node')).toHaveLength(9)
+  expect(container.querySelectorAll('.flame-node')).toHaveLength(8)
+  expect(container.querySelector('.flame-node[data-depth="0"]')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'SELECT orders: 50.0 %' }))
   expect(screen.getByRole('complementary', { name: 'Выбранный узел' })).toHaveTextContent('50 % внутри корня')
   fireEvent.click(screen.getByRole('button', { name: 'Текст запроса' }))

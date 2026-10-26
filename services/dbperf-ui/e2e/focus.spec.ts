@@ -467,7 +467,7 @@ test('mobile flame graph fits the viewport without page overflow', async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await fixture(page)
-  await expect(page.locator('.flame-node[data-depth="0"]')).toBeVisible()
+  await expect(page.locator('.flame-node[data-depth="1"]').first()).toBeVisible()
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

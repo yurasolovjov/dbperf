@@ -110,10 +110,11 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
   const selected: FlameNode = (selectedPath && find(tree, selectedPath)) || displayed
   const matchSet = new Set(matched)
   const related = (n: FlameNode) => matched.some((m) => isAncestor(m, n) || isAncestor(n, m))
-  const depthMax = Math.max(...boxes.map((b) => b.node.depth))
-  const rows = depthMax + 1
+  // The whole-window root is implied by the breadcrumb, so rows start at level 1.
+  const rows = Math.max(1, ...boxes.map((b) => b.node.depth))
+  const rowTop = (depth: number) => (depth - 1) * (ROW + GAP)
   const levelName = (depth: number) =>
-    depth === 0 ? 'всё' : (DIMENSIONS.find((d) => d.key === dimensions[depth - 1])?.label ?? dimensions[depth - 1] ?? '')
+    DIMENSIONS.find((d) => d.key === dimensions[depth - 1])?.label ?? dimensions[depth - 1] ?? ''
 
   return (
     <div className="flame-view" onKeyDown={onKey} aria-busy={loading}>
@@ -162,7 +163,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
         <div className="flame-levels" aria-hidden="true" style={{ height: rows * (ROW + GAP) }}>
           {Array.from({ length: rows }, (_, d) => (
             <span key={d} style={{ top: d * (ROW + GAP), height: ROW }}>
-              {levelName(d)}
+              {levelName(d + 1)}
             </span>
           ))}
         </div>
@@ -173,13 +174,13 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
           style={{ height: rows * (ROW + GAP) }}
           onMouseLeave={() => setHover(null)}
         >
-          {ancestors.map((node) => (
+          {ancestors.filter((node) => node.depth > 0).map((node) => (
             <button
               type="button"
               key={`ancestor-${node.depth}`}
               className="flame-node ancestor"
               data-depth={node.depth}
-              style={{ left: 0, width: '100%', top: node.depth * (ROW + GAP), height: ROW, ['--flame-color' as string]: color(node) }}
+              style={{ left: 0, width: '100%', top: rowTop(node.depth), height: ROW, ['--flame-color' as string]: color(node) }}
               aria-label={`${label(node)}: ${pct(node).toFixed(1)} % (уровень выше)`}
               title="Вернуться на уровень выше"
               onClick={() => makeRoot(node)}
@@ -189,7 +190,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
               </span>
             </button>
           ))}
-          {boxes.map(({ node, left, width }) => {
+          {boxes.filter((b) => b.node.depth > 0).map(({ node, left, width }) => {
             const match = matchSet.has(node)
             const dimmed = query.trim() !== '' && !match && !related(node)
             const isSelected = selected === node
@@ -202,7 +203,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
                 style={{
                   left: `${left * 100}%`,
                   width: `${width * 100}%`,
-                  top: node.depth * (ROW + GAP),
+                  top: rowTop(node.depth),
                   height: ROW,
                   ['--flame-color' as string]: color(node),
                 }}
@@ -228,7 +229,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
               role="tooltip"
               style={{
                 left: `${Math.min(hover.left, 0.6) * 100}%`,
-                top: (hover.node.depth + 1) * (ROW + GAP) + 2,
+                top: rowTop(hover.node.depth + 1) + 2,
               }}
             >
               <strong>{hover.node.depth ? pathText(hover.node) : label(hover.node)}</strong>
