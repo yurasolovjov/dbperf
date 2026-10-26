@@ -60,10 +60,10 @@ it('table filters survive tabs, units, pagination and resizing',async()=>{
  vi.mocked(api.top).mockResolvedValue({...top,matchedRows:2});fireEvent.click(screen.getByRole('button',{name:'Обновить данные'}));await waitFor(()=>expect(lastTop().offset).toBe(0))
 })
 it('flame graph opens the query dialog, filters the dashboard and changes the level order',async()=>{
- render(<Dashboard/>);await loaded();fireEvent.click(await screen.findByRole('button',{name:'SELECT orders: 50.0 %'}))
+ render(<Dashboard/>);await loaded();fireEvent.click(await screen.findByRole('button',{name:'#prod: 50.0 %'}))
  fireEvent.click(screen.getByRole('button',{name:'Текст запроса'}));await screen.findByRole('dialog');fireEvent.click(screen.getByRole('button',{name:'Закрыть запрос'}))
  fireEvent.click(screen.getByRole('button',{name:'В фильтр дашборда'}));await waitFor(()=>expect(lastTop().filters.some(f=>f.dimension==='QUERY')).toBe(true))
- fireEvent.click(screen.getByRole('button',{name:/перевернуть/}));await waitFor(()=>expect(vi.mocked(api.profile).mock.calls.slice(-1)[0]![0].dimensions[0]).toBe('WAIT_EVENT'))
+ fireEvent.click(screen.getByRole('button',{name:/перевернуть/}));await waitFor(()=>expect(vi.mocked(api.profile).mock.calls.slice(-1)[0]![0].dimensions[0]).toBe('APPLICATION_NAME'))
  fireEvent.click(screen.getByRole('button',{name:'График'}));expect(screen.getByRole('img',{name:'Анализ'})).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button',{name:'Flame graph'}));await screen.findByRole('group',{name:'Flame graph активности'})
 })

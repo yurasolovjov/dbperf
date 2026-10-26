@@ -56,10 +56,11 @@ export function ActivityPage({
   const [chartMode, setChartMode] = useState<ChartMode>('smooth')
   const [view, setView] = useState<'flame' | 'chart'>('flame')
   const [profileOrder, setProfileOrder] = useState<Dimension[]>([
-    'QUERY',
     'DATNAME',
+    'QUERY',
     'WAIT_EVENT_TYPE',
     'WAIT_EVENT',
+    'APPLICATION_NAME',
   ])
   const range = useMemo(
     () => ({
