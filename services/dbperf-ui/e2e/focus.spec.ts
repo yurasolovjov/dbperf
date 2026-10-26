@@ -315,24 +315,18 @@ test('fullscreen includes the table and custom popover; Escape exits', async ({
     page.getByRole('button', { name: 'Весь дашборд на полный экран' }),
   ).toBeVisible()
 })
-test('profile SQL cards wrap and open the query dialog', async ({ page }) => {
+test('flame graph lists queries and opens the query dialog', async ({ page }) => {
   await fixture(page)
-  await page.getByRole('button', { name: 'Профиль', exact: true }).click()
-  await expect(page.locator('.profile-query-row .profile-node')).toHaveCount(80)
-  const boxes = await page
-    .locator('.profile-query-row .profile-node')
-    .evaluateAll((nodes) =>
-      nodes.map((n) => {
-        const r = n.getBoundingClientRect()
-        return { width: r.width, top: r.top }
-      }),
-    )
-  expect(Math.min(...boxes.map((b) => b.width))).toBeGreaterThanOrEqual(180)
-  expect(new Set(boxes.map((b) => b.top)).size).toBeGreaterThan(1)
-  await page.locator('.profile-node-main').first().click()
+  const nodes = page.locator('.flame-node[data-depth="1"]')
+  await expect(nodes.first()).toBeVisible()
+  expect(await nodes.count()).toBeGreaterThan(1)
+  await nodes.first().click()
+  await page.getByRole('button', { name: 'Текст запроса' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).not.toBeVisible()
+  await nodes.first().dblclick()
+  await expect(page.locator('.flame-node[data-depth="1"]')).toHaveCount(1)
 })
 for (const size of [
   { width: 1024, height: 768 },
@@ -468,18 +462,12 @@ test('live stack: server-side SQL filter, cross-tab reuse and query modal', asyn
   await page.screenshot({ path: 'test-results/focus-live.png', fullPage: true })
 })
 
-test('mobile profile keeps readable SQL cards without page overflow', async ({
+test('mobile flame graph fits the viewport without page overflow', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await fixture(page)
-  await page.getByRole('button', { name: 'Профиль', exact: true }).click()
-  await expect(page.locator('.profile-node')).toHaveCount(80)
-  const bounds = await page
-    .locator('.profile-node')
-    .evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect().width))
-  expect(Math.min(...bounds)).toBeGreaterThanOrEqual(180)
-  expect(Math.max(...bounds)).toBeLessThanOrEqual(390)
+  await expect(page.locator('.flame-node[data-depth="0"]')).toBeVisible()
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

@@ -47,7 +47,7 @@ it('dashboard preserves shared filters, updates dimensions, periods and chart se
  fireEvent.click(screen.getByRole('button',{name:'Убрать общий фильтр QUERY'}));await waitFor(()=>expect(lastTop().filters).toEqual([]))
  fireEvent.click(screen.getByRole('button',{name:'Фильтр дашборда: SELECT orders'}));await waitFor(()=>expect(lastTop().filters).toContainEqual({dimension:'QUERY',values:['123']}))
  fireEvent.click(screen.getByRole('button',{name:'Сбросить всё'}));await waitFor(()=>expect(lastTop().filters).toEqual([]))
- fireEvent.keyDown(screen.getByRole('button',{name:'Анализ: начало окна'}),{key:'ArrowRight'});await waitFor(()=>expect(lastTop().range.startUnix).toBeGreaterThan(0))
+ fireEvent.click(screen.getByRole('button',{name:'График'}));fireEvent.keyDown(screen.getByRole('button',{name:'Анализ: начало окна'}),{key:'ArrowRight'});await waitFor(()=>expect(lastTop().range.startUnix).toBeGreaterThan(0))
  fireEvent.keyDown(screen.getByRole('group',{name:'Обзор: переместить окно'}),{key:'ArrowLeft'})
  fireEvent.click(screen.getByRole('button',{name:'Автообновление'}));fireEvent.click(screen.getByRole('option',{name:'Обновление выкл.'}));fireEvent.click(screen.getByRole('button',{name:'Обновить данные'}))
 })
@@ -59,12 +59,13 @@ it('table filters survive tabs, units, pagination and resizing',async()=>{
  fireEvent.click(screen.getByRole('button',{name:'Следующая страница'}));await waitFor(()=>expect(lastTop().offset).toBe(8))
  vi.mocked(api.top).mockResolvedValue({...top,matchedRows:2});fireEvent.click(screen.getByRole('button',{name:'Обновить данные'}));await waitFor(()=>expect(lastTop().offset).toBe(0))
 })
-it('profile changes order and filters from the real query dialog',async()=>{
- render(<Dashboard/>);await loaded();fireEvent.click(screen.getByRole('button',{name:'Профиль'}));await screen.findByRole('button',{name:/SELECT orders 50/})
- fireEvent.click(screen.getByRole('button',{name:/SELECT orders 50/}));await screen.findByRole('dialog');fireEvent.click(screen.getByRole('button',{name:'Закрыть запрос'}))
- fireEvent.click(screen.getByRole('button',{name:'В фильтры: 123'}));await waitFor(()=>expect(lastTop().filters.some(f=>f.dimension==='QUERY')).toBe(true))
+it('flame graph opens the query dialog, filters the dashboard and changes the level order',async()=>{
+ render(<Dashboard/>);await loaded();fireEvent.click(await screen.findByRole('button',{name:'SELECT orders: 50.0 %'}))
+ fireEvent.click(screen.getByRole('button',{name:'Текст запроса'}));await screen.findByRole('dialog');fireEvent.click(screen.getByRole('button',{name:'Закрыть запрос'}))
+ fireEvent.click(screen.getByRole('button',{name:'В фильтр дашборда'}));await waitFor(()=>expect(lastTop().filters.some(f=>f.dimension==='QUERY')).toBe(true))
  fireEvent.click(screen.getByRole('button',{name:/перевернуть/}));await waitFor(()=>expect(vi.mocked(api.profile).mock.calls.slice(-1)[0]![0].dimensions[0]).toBe('WAIT_EVENT'))
  fireEvent.click(screen.getByRole('button',{name:'График'}));expect(screen.getByRole('img',{name:'Анализ'})).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button',{name:'Flame graph'}));await screen.findByRole('group',{name:'Flame graph активности'})
 })
 it('fullscreen supports native entry, browser change, exit, fallback and Escape',async()=>{
  const request=vi.fn().mockResolvedValue(undefined),exit=vi.fn().mockResolvedValue(undefined)
@@ -81,7 +82,7 @@ it('displays failures and retries without hiding the entire dashboard',async()=>
  vi.mocked(api.timeSeries).mockRejectedValue(new Error('timeseries failed'))
  render(<Dashboard/>);await screen.findByRole('alert');expect(screen.getByRole('banner')).toBeVisible()
  vi.mocked(api.timeSeries).mockResolvedValue(series);fireEvent.click(screen.getByRole('button',{name:'Повторить'}));await loaded();expect(screen.queryByRole('alert')).toBeNull()
- vi.mocked(api.profile).mockRejectedValue(new Error('profile failed'));fireEvent.click(screen.getByRole('button',{name:'Профиль'}));await screen.findByRole('alert')
+ vi.mocked(api.profile).mockRejectedValue(new Error('profile failed'));fireEvent.click(screen.getByRole('button',{name:'График'}));fireEvent.click(screen.getByRole('button',{name:'Flame graph'}));await screen.findByRole('alert')
 })
 it('handles no selected target, empty registry, no samples and aggregate data',async()=>{
  vi.mocked(registry.list).mockResolvedValue([])
@@ -129,6 +130,7 @@ it('shows chart loaders and card skeletons until data arrives', async () => {
  vi.mocked(api.totals).mockReturnValue(new Promise(resolve=>{resolveTotals=resolve}))
  vi.mocked(api.targetStatus).mockReturnValue(new Promise(resolve=>{resolveStatus=resolve}))
  const {container}=render(<Dashboard/>)
+ fireEvent.click(await screen.findByRole('button',{name:'График'}))
  await screen.findByRole('status',{name:'Обзор: загрузка данных'})
  expect(screen.getByRole('status',{name:'Анализ: загрузка данных'})).toBeVisible()
  expect(container.querySelectorAll('.focus-plot .loading-skeleton')).toHaveLength(0)
