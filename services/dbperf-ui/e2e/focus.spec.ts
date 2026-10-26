@@ -150,6 +150,12 @@ async function fixture(page: Page) {
   await page.getByRole('option', { name: 'Обновление выкл.' }).click()
   return requests
 }
+// The analysis block opens on the flame graph; chart tests switch to the timeline.
+async function chartView(page: Page) {
+  await page.getByRole('button', { name: 'График', exact: true }).click()
+  await expect(page.locator('.detail-plot')).toBeVisible()
+}
+
 test('custom seconds apply and manual refresh re-fetches fixed intervals', async ({
   page,
 }) => {
@@ -247,6 +253,7 @@ test('column filters survive tabs and units and are sent to the backend', async 
 })
 test('both chart windows move and resize independently', async ({ page }) => {
   const requests = await fixture(page)
+  await chartView(page)
   const overview = page.getByRole('group', {
     name: 'Обзор: переместить окно',
     exact: true,
@@ -317,11 +324,15 @@ test('fullscreen includes the table and custom popover; Escape exits', async ({
 })
 test('flame graph lists queries and opens the query dialog', async ({ page }) => {
   await fixture(page)
-  const nodes = page.locator('.flame-node[data-depth="1"]')
-  await expect(nodes.first()).toBeVisible()
-  expect(await nodes.count()).toBeGreaterThan(1)
-  await nodes.first().click()
-  await expect(page.locator('.flame-node[data-depth="1"]')).toHaveCount(1)
+  // The fixture has one database, so the first level is a single node; the
+  // SQL level below it lists every query.
+  const databases = page.locator('.flame-node[data-depth="1"]')
+  await expect(databases).toHaveCount(1)
+  await databases.first().click()
+  const queries = page.locator('.flame-node[data-depth="2"]')
+  expect(await queries.count()).toBeGreaterThan(1)
+  await queries.first().click()
+  await expect(page.locator('.flame-node[data-depth="2"]')).toHaveCount(1)
   await page.getByRole('button', { name: 'Текст запроса' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.keyboard.press('Escape')
@@ -519,6 +530,7 @@ test('column popovers stay visible above an empty table and inside fullscreen', 
 test('smooth and snapshot modes update both charts while preserving windows and requests', async ({page}) => {
   const requests = await fixture(page)
   await page.goto('/#/t/1/activity')
+  await chartView(page)
   await expect(page.locator('.detail-plot .series-area').first()).toBeVisible()
   const paths = () => page.locator('.focus-plot svg > path:last-of-type').evaluateAll(elements => elements.map(e => e.getAttribute('d')))
   const windows = () => page.locator('.brush-window').evaluateAll(elements => elements.map(e => e.getAttribute('style')))
@@ -574,6 +586,7 @@ test('chart loaders preserve plots while cards and table show skeletons in both 
   // Crossing a real second used to shift the retained plot while refreshing.
   await page.clock.setFixedTime(new Date('2026-10-26T12:00:00Z'))
   await fixture(page)
+  await chartView(page)
   await expect(page.locator('.focus-charts')).toHaveAttribute('aria-busy','false')
   await expect.poll(() => page.locator('.focus-plot').evaluateAll(plots => plots.every(plot => {
     const bounds = plot.getBoundingClientRect(), box = plot.querySelector('svg')!.viewBox.baseVal
@@ -621,6 +634,7 @@ test('chart loaders preserve plots while cards and table show skeletons in both 
 
 test('both chart tooltips follow the pointer, show series and keep the panel on screen', async ({page}) => {
   await fixture(page)
+  await chartView(page)
   for (const selector of ['.overview-plot','.detail-plot']) {
     const plot = page.locator(selector), bounds = (await plot.boundingBox())!
     const tooltip = plot.getByRole('tooltip')
@@ -658,6 +672,7 @@ test('both chart tooltips follow the pointer, show series and keep the panel on 
 
 test('chart tooltip uses project surfaces and contrasting crosshairs with arrow cursors in both themes', async ({page}) => {
   await fixture(page)
+  await chartView(page)
   for (const theme of [{name:'Тёмная',dark:true},{name:'Светлая',dark:false}]) {
     await page.getByRole('button',{name:theme.name,exact:true}).click()
     for (const selector of ['.overview-plot','.detail-plot']) {

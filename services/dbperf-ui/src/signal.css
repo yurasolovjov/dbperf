@@ -333,7 +333,7 @@ button[aria-expanded='true'] > .select-chevron { transform:rotate(180deg); }
 :root[data-theme='light'] {
   --flame-root: #69788a; --flame-a: #6a5bc4; --flame-b: #5f7489; --flame-match: #b8860b;
 }
-.flame-view { padding:4px 0 8px; display:flex; flex-direction:column; gap:8px; }
+.flame-view { --flame-row:29px; --flame-row-h:26px; padding:4px 0 8px; display:flex; flex-direction:column; gap:8px; }
 .flame-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; }
 .flame-breadcrumb { flex:1 1 240px; min-width:0; display:flex; flex-wrap:wrap; align-items:baseline; gap:2px; }
 .flame-breadcrumb .link { font-size:12px; }
@@ -381,4 +381,19 @@ button[aria-expanded='true'] > .select-chevron { transform:rotate(180deg); }
   .flame-body { grid-template-columns:56px minmax(0,1fr); }
   .flame-card { grid-column:1 / -1; }
   .flame-levels span { font-size:9px; }
+}
+/* Low screens: the flame graph takes the height the timeline chart had. */
+@media (min-width: 1024px) and (max-height: 820px) {
+  .flame-view { --flame-row:20px; --flame-row-h:18px; padding:0; gap:3px; }
+  .flame-node { font-size:10px; padding:0 4px; }
+  .flame-toolbar { font-size:11px; gap:8px; }
+  .flame-search input { padding:2px 6px; width:150px; }
+  .flame-card { padding:6px 10px; gap:3px; font-size:11px; }
+  .flame-card-actions { margin-top:2px; gap:2px; }
+  .flame-card-actions .btn.small { padding:1px 6px; font-size:11px; }
+  .flame-footer { display:none; }
+  .dim-order { margin:0; }
+  .dim-order, .dim-order .chip, .dim-order .select-trigger { font-size:11px; }
+  .dim-order .chip { padding:1px 4px; }
+  .dim-order .select-trigger { min-height:22px; padding:1px 6px; }
 }

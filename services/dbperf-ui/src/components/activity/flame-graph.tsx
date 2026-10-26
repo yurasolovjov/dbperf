@@ -23,8 +23,9 @@ interface Props {
   loading?: boolean
 }
 
-const ROW = 26
-const GAP = 3
+// Row geometry lives in CSS (--flame-row / --flame-row-h) so compact screens
+// can shrink the graph; the component only counts rows.
+const rowHeight = 'var(--flame-row-h)'
 const LABEL_MIN_WIDTH = 0.03 // boxes narrower than 3 % carry no text
 
 // FlameGraph draws the activity profile as an icicle: one row per dimension
@@ -112,7 +113,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
   // level 1; a focused node becomes the top row and its parents are hidden.
   const firstDepth = Math.max(1, displayed.depth)
   const rows = Math.max(1, ...boxes.map((b) => b.node.depth - firstDepth + 1))
-  const rowTop = (depth: number) => (depth - firstDepth) * (ROW + GAP)
+  const rowTop = (depth: number) => `calc(var(--flame-row) * ${depth - firstDepth})`
   const levelName = (depth: number) =>
     DIMENSIONS.find((d) => d.key === dimensions[depth - 1])?.label ?? dimensions[depth - 1] ?? ''
 
@@ -160,9 +161,9 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
         </label>
       </div>
       <div className="flame-body">
-        <div className="flame-levels" aria-hidden="true" style={{ height: rows * (ROW + GAP) }}>
+        <div className="flame-levels" aria-hidden="true" style={{ height: `calc(var(--flame-row) * ${rows})` }}>
           {Array.from({ length: rows }, (_, d) => (
-            <span key={d} style={{ top: d * (ROW + GAP), height: ROW }}>
+            <span key={d} style={{ top: `calc(var(--flame-row) * ${d})`, height: rowHeight }}>
               {levelName(firstDepth + d)}
             </span>
           ))}
@@ -171,7 +172,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
           className="flame-plot"
           role="group"
           aria-label="Flame graph активности"
-          style={{ height: rows * (ROW + GAP) }}
+          style={{ height: `calc(var(--flame-row) * ${rows})` }}
           onMouseLeave={() => setHover(null)}
         >
           {boxes.filter((b) => b.node.depth > 0).map(({ node, left, width }) => {
@@ -188,7 +189,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
                   left: `${left * 100}%`,
                   width: `${width * 100}%`,
                   top: rowTop(node.depth),
-                  height: ROW,
+                  height: rowHeight,
                   ['--flame-color' as string]: color(node),
                 }}
                 aria-label={`${label(node)}: ${pct(node).toFixed(1)} %`}
@@ -212,7 +213,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
               role="tooltip"
               style={{
                 left: `${Math.min(hover.left, 0.6) * 100}%`,
-                top: rowTop(hover.node.depth + 1) + 2,
+                top: `calc(${rowTop(hover.node.depth + 1)} + 2px)`,
               }}
             >
               <strong>{pathText(hover.node)}</strong>
