@@ -321,12 +321,11 @@ test('flame graph lists queries and opens the query dialog', async ({ page }) =>
   await expect(nodes.first()).toBeVisible()
   expect(await nodes.count()).toBeGreaterThan(1)
   await nodes.first().click()
+  await expect(page.locator('.flame-node[data-depth="1"]')).toHaveCount(1)
   await page.getByRole('button', { name: 'Текст запроса' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await nodes.first().dblclick()
-  await expect(page.locator('.flame-node[data-depth="1"]')).toHaveCount(1)
 })
 for (const size of [
   { width: 1024, height: 768 },

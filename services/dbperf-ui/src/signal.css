@@ -355,11 +355,9 @@ button[aria-expanded='true'] > .select-chevron { transform:rotate(180deg); }
 .flame-node small { color:var(--muted); font-size:10px; }
 .flame-node:hover { background:color-mix(in srgb, var(--flame-color) 50%, var(--card)); }
 .flame-node.rest { border-left-style:dashed; color:var(--muted); }
-.flame-node.selected { outline:2px solid var(--accent); outline-offset:-2px; }
+.flame-node.focused { font-weight:600; }
 .flame-node.match { outline:2px solid var(--flame-match); outline-offset:-2px; }
 .flame-node.dimmed { opacity:.35; }
-.flame-node.ancestor { opacity:.5; border-left-style:dotted; }
-.flame-node.ancestor:hover { opacity:.8; }
 .flame-node[data-depth='0'] { font-weight:600; }
 .flame-node:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .flame-tip {

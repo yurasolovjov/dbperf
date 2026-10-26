@@ -28,11 +28,11 @@ const GAP = 3
 const LABEL_MIN_WIDTH = 0.03 // boxes narrower than 3 % carry no text
 
 // FlameGraph draws the activity profile as an icicle: one row per dimension
-// level, width = share of snapshots. Click selects a node, double click makes
-// it the root, Escape resets the root.
+// level, width = share of snapshots. As in pprof, a click focuses the node:
+// it becomes the top row, only its descendants stay, the breadcrumb leads
+// back and Escape returns to the whole window.
 export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Props) {
   const [rootPath, setRootPath] = useState<string[]>([])
-  const [selectedPath, setSelectedPath] = useState<string[] | null>(null)
   const [query, setQuery] = useState('')
   const [folded, setFolded] = useState(true)
   const [hover, setHover] = useState<{ node: FlameNode; left: number; width: number } | null>(null)
@@ -87,16 +87,15 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
     for (let x: FlameNode | null = n; x && x.depth > 0; x = x.parent) parts.unshift(label(x))
     return parts.join(' › ')
   }
-  const makeRoot = (n: FlameNode) => {
+  const focus = (n: FlameNode) => {
+    if (n.remainder) return
     setRootPath(pathOf(n))
-    setSelectedPath(null)
     setHover(null)
   }
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && (rootPath.length || selectedPath)) {
+    if (e.key === 'Escape' && rootPath.length) {
       e.stopPropagation()
       setRootPath([])
-      setSelectedPath(null)
     }
   }
 
@@ -107,12 +106,13 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
       </div>
     )
 
-  const selected: FlameNode = (selectedPath && find(tree, selectedPath)) || displayed
   const matchSet = new Set(matched)
   const related = (n: FlameNode) => matched.some((m) => isAncestor(m, n) || isAncestor(n, m))
-  // The whole-window root is implied by the breadcrumb, so rows start at level 1.
-  const rows = Math.max(1, ...boxes.map((b) => b.node.depth))
-  const rowTop = (depth: number) => (depth - 1) * (ROW + GAP)
+  // The whole-window root is implied by the breadcrumb, so rows start at
+  // level 1; a focused node becomes the top row and its parents are hidden.
+  const firstDepth = Math.max(1, displayed.depth)
+  const rows = Math.max(1, ...boxes.map((b) => b.node.depth - firstDepth + 1))
+  const rowTop = (depth: number) => (depth - firstDepth) * (ROW + GAP)
   const levelName = (depth: number) =>
     DIMENSIONS.find((d) => d.key === dimensions[depth - 1])?.label ?? dimensions[depth - 1] ?? ''
 
@@ -120,11 +120,11 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
     <div className="flame-view" onKeyDown={onKey} aria-busy={loading}>
       <div className="flame-toolbar">
         <div className="flame-breadcrumb" aria-label="Корень flame graph">
-          <button type="button" className="link" onClick={() => makeRoot(tree)}>
+          <button type="button" className="link" onClick={() => focus(tree)}>
             Вся активность
           </button>
           {ancestors.slice(1).map((n) => (
-            <button type="button" className="link" key={n.depth} onClick={() => makeRoot(n)}>
+            <button type="button" className="link" key={n.depth} onClick={() => focus(n)}>
               {' / '}
               {label(n)}
             </button>
@@ -137,7 +137,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
           )}
           <span className="muted">
             {' '}
-            · корень {pct(displayed).toFixed(1)} %, {aas(displayed).toFixed(2)} AAS
+            · {pct(displayed).toFixed(1)} %, {aas(displayed).toFixed(2)} AAS
           </span>
         </div>
         <label className="flame-search">
@@ -163,7 +163,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
         <div className="flame-levels" aria-hidden="true" style={{ height: rows * (ROW + GAP) }}>
           {Array.from({ length: rows }, (_, d) => (
             <span key={d} style={{ top: d * (ROW + GAP), height: ROW }}>
-              {levelName(d + 1)}
+              {levelName(firstDepth + d)}
             </span>
           ))}
         </div>
@@ -174,31 +174,15 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
           style={{ height: rows * (ROW + GAP) }}
           onMouseLeave={() => setHover(null)}
         >
-          {ancestors.filter((node) => node.depth > 0).map((node) => (
-            <button
-              type="button"
-              key={`ancestor-${node.depth}`}
-              className="flame-node ancestor"
-              data-depth={node.depth}
-              style={{ left: 0, width: '100%', top: rowTop(node.depth), height: ROW, ['--flame-color' as string]: color(node) }}
-              aria-label={`${label(node)}: ${pct(node).toFixed(1)} % (уровень выше)`}
-              title="Вернуться на уровень выше"
-              onClick={() => makeRoot(node)}
-            >
-              <span>
-                {label(node)} <small>{pct(node).toFixed(1)} %</small>
-              </span>
-            </button>
-          ))}
           {boxes.filter((b) => b.node.depth > 0).map(({ node, left, width }) => {
             const match = matchSet.has(node)
             const dimmed = query.trim() !== '' && !match && !related(node)
-            const isSelected = selected === node
+            const isRoot = node === displayed
             return (
               <button
                 type="button"
-                key={pathOf(node).join('\u0001') || 'root'}
-                className={`flame-node ${node.remainder ? 'rest' : ''} ${isSelected ? 'selected' : ''} ${match ? 'match' : ''} ${dimmed ? 'dimmed' : ''}`}
+                key={pathOf(node).join('\u0001')}
+                className={`flame-node ${node.remainder ? 'rest' : ''} ${isRoot ? 'focused' : ''} ${match ? 'match' : ''} ${dimmed ? 'dimmed' : ''}`}
                 data-depth={node.depth}
                 style={{
                   left: `${left * 100}%`,
@@ -208,9 +192,8 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
                   ['--flame-color' as string]: color(node),
                 }}
                 aria-label={`${label(node)}: ${pct(node).toFixed(1)} %`}
-                aria-pressed={isSelected}
-                onClick={() => setSelectedPath(pathOf(node))}
-                onDoubleClick={() => node.children.length && makeRoot(node)}
+                aria-pressed={isRoot}
+                onClick={() => focus(node)}
                 onMouseEnter={() => setHover({ node, left, width })}
                 onFocus={() => setHover({ node, left, width })}
                 onBlur={() => setHover(null)}
@@ -232,41 +215,34 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
                 top: rowTop(hover.node.depth + 1) + 2,
               }}
             >
-              <strong>{hover.node.depth ? pathText(hover.node) : label(hover.node)}</strong>
+              <strong>{pathText(hover.node)}</strong>
               <span>
                 {pct(hover.node).toFixed(1)} % · {aas(hover.node).toFixed(2)} AAS · {hover.node.samples} снимков
               </span>
             </div>
           )}
         </div>
-        <aside className="flame-card" aria-label="Выбранный узел">
-          <span className="muted">Выбранный узел</span>
-          <strong>{selected.depth ? pathText(selected) : label(selected)}</strong>
+        <aside className="flame-card" aria-label="Текущий узел">
+          <span className="muted">{displayed.depth ? 'Текущий узел' : 'Весь профиль'}</span>
+          <strong>{displayed.depth ? pathText(displayed) : label(displayed)}</strong>
           <span>
-            {pct(selected).toFixed(1)} % всей активности
+            {pct(displayed).toFixed(1)} % всей активности
             <br />
-            {displayed.samples ? ((100 * selected.samples) / displayed.samples).toFixed(0) : 0} % внутри корня
-            <br />
-            {aas(selected).toFixed(2)} AAS · {selected.samples} снимков
+            {aas(displayed).toFixed(2)} AAS · {displayed.samples} снимков
           </span>
           <div className="flame-card-actions">
-            {selected.depth > 0 && !selected.remainder && (
-              <button type="button" className="btn small" onClick={() => onFilter(dimOf(selected)!, selected.value)}>
+            {displayed.depth > 0 && (
+              <button type="button" className="btn small" onClick={() => onFilter(dimOf(displayed)!, displayed.value)}>
                 В фильтр дашборда
               </button>
             )}
-            {dimOf(selected) === 'QUERY' && !selected.remainder && (
-              <button type="button" className="btn small" onClick={() => onQuery(selected.value)}>
+            {dimOf(displayed) === 'QUERY' && (
+              <button type="button" className="btn small" onClick={() => onQuery(displayed.value)}>
                 Текст запроса
               </button>
             )}
-            {selected !== displayed && selected.children.length > 0 && (
-              <button type="button" className="btn small" onClick={() => makeRoot(selected)}>
-                Сделать корнем
-              </button>
-            )}
-            {(rootPath.length > 0 || selectedPath) && (
-              <button type="button" className="btn small" onClick={() => makeRoot(tree)}>
+            {rootPath.length > 0 && (
+              <button type="button" className="btn small" onClick={() => focus(tree)}>
                 Сбросить
               </button>
             )}
@@ -284,7 +260,7 @@ export function FlameGraph({ data, dimensions, onQuery, onFilter, loading }: Pro
             ))}
           </span>
         )}
-        <span>Ширина — доля снимков. Клик — выбрать, двойной клик — сделать корнем, Esc — сброс.</span>
+        <span>Ширина — доля снимков. Клик — оставить узел и вложенные, Esc — вся активность.</span>
         {covered < total && (
           <span>За пределами выдачи профиля: {((100 * (total - covered)) / total).toFixed(1)} %</span>
         )}
