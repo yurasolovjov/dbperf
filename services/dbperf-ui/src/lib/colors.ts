@@ -52,3 +52,20 @@ export function sliceColor(dimension: Dimension, slice: SliceValue): string {
 export function waitTypeColor(type: string): string {
   return WAIT_TYPE_COLORS[type] ?? WAIT_TYPE_COLORS.other
 }
+
+// CSS colors follow the theme without changing slice identity or refetching data.
+export function hashCssColor(value: string): string {
+  return `var(--category-${fnv1a(value) % CATEGORICAL.length})`
+}
+export function waitCssColor(type: string): string {
+  return `var(--wait-${Object.prototype.hasOwnProperty.call(WAIT_TYPE_COLORS, type) ? type.toLowerCase() : 'other'})`
+}
+export function sliceCssColor(dimension: Dimension, slice: SliceValue): string {
+  if (slice.isRemainder) return waitCssColor('other')
+  if (dimension === 'WAIT_EVENT_TYPE') return Object.prototype.hasOwnProperty.call(WAIT_TYPE_COLORS, slice.value) ? waitCssColor(slice.value) : hashCssColor(slice.value)
+  if (dimension === 'WAIT_EVENT') {
+    const type = slice.value.split('.')[0]
+    return Object.prototype.hasOwnProperty.call(WAIT_TYPE_COLORS, type) ? waitCssColor(type) : hashCssColor(slice.value)
+  }
+  return hashCssColor(slice.value)
+}

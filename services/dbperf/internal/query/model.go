@@ -54,6 +54,7 @@ type Filter struct {
 	Dim     Dimension
 	Values  []string
 	Exclude bool
+	Match   int // 0 values, 1 contains, 2 text equals
 }
 
 // TopSlicing asks for the Limit largest values of a dimension.
@@ -117,14 +118,21 @@ type TimeSeriesResult struct {
 	Series     []Series
 }
 
+type MetricRange struct {
+	Min, Max *float64
+}
+
 // TopRequest asks for the top values over a window with an optional nested slice.
 type TopRequest struct {
-	TargetID    uint32
-	Range       Range
-	Slicing     TopSlicing
-	SubSlicing  *TopSlicing
-	Filters     []Filter
-	ExcludeSelf bool
+	TableFilters     []Filter
+	AAS, Percent     *MetricRange
+	PageSize, Offset int
+	TargetID         uint32
+	Range            Range
+	Slicing          TopSlicing
+	SubSlicing       *TopSlicing
+	Filters          []Filter
+	ExcludeSelf      bool
 }
 
 // TopEntry is one row of the top table.
@@ -137,9 +145,11 @@ type TopEntry struct {
 
 // TopResult is the top table.
 type TopResult struct {
-	TotalAAS float64
-	NSamples int64
-	Entries  []TopEntry
+	MatchedRows uint64
+	Level       string
+	TotalAAS    float64
+	NSamples    int64
+	Entries     []TopEntry
 }
 
 // TotalsRequest asks for unsliced activity per bucket.

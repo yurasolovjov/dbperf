@@ -21,6 +21,7 @@ export interface Filter {
   dimension: Dimension
   values: string[]
   exclude?: boolean
+  match?: 'MATCH_VALUES' | 'MATCH_CONTAINS' | 'MATCH_TEXT_EQUALS'
 }
 
 export interface TopSlicing {
@@ -75,7 +76,17 @@ export interface TopEntry {
   sub: TopEntry[]
 }
 
+export interface MetricRange { min?: number; max?: number }
+
+export interface TableFilters {
+  dimensions: Filter[]
+  aas?: MetricRange
+  percent?: MetricRange
+}
+
 export interface TopResponse {
+  matchedRows: number
+  level: string
   totalAas: number
   nSamples: number
   entries: TopEntry[]

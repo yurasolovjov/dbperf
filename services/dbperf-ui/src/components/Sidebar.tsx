@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ThemeSwitch } from './ThemeSwitch'
 import type { RegistryTarget } from '../api/registry'
 import type { Route } from '../lib/router'
 
@@ -22,17 +23,17 @@ export function Sidebar({ targets, owners, route, onNavigate, error }: Props) {
   return (
     <aside className={`sidebar ${open ? '' : 'collapsed'}`}>
       <div className="sidebar-head">
-        <span className="brand">dbperf</span>
+        <span className="brand"><span className="brand-symbol" aria-hidden="true">▤</span>dbperf</span>
         <button className="btn icon-btn" onClick={() => setOpen((v) => !v)} title={open ? 'Скрыть панель' : 'Показать панель'} aria-label="Переключить панель">
           {open ? '‹' : '›'}
         </button>
       </div>
+      <a className={`nav-link ${route.page === 'targets' ? 'active' : ''}`} href="#/targets" onClick={(e) => (e.preventDefault(), onNavigate({ page: 'targets' }))}>
+        Объекты мониторинга <span className="muted">{targets.length}</span>
+      </a>
       {open && (
         <>
-          <a className={`nav-link ${route.page === 'targets' ? 'active' : ''}`} href="#/targets" onClick={(e) => (e.preventDefault(), onNavigate({ page: 'targets' }))}>
-            ⚙ Объекты мониторинга <span className="muted">{targets.length}</span>
-          </a>
-          <input className="search" placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="search" aria-label="Найти объект" placeholder="Найти объект…" value={q} onChange={(e) => setQ(e.target.value)} />
           {error && <div className="error small">{error}</div>}
           <ul className="target-list">
             {list.map((t) => {
@@ -56,6 +57,10 @@ export function Sidebar({ targets, owners, route, onNavigate, error }: Props) {
           </ul>
         </>
       )}
+      <footer className="sidebar-footer">
+        <div className="sidebar-status"><span className="status-dot" />{targets.filter((t) => t.enabled).length} объектов включено</div>
+        <ThemeSwitch />
+      </footer>
     </aside>
   )
 }

@@ -1,5 +1,6 @@
 import type {
   Dimension,
+  MetricRange,
   Filter,
   ProfileResponse,
   QueryTextResponse,
@@ -55,6 +56,7 @@ async function request<T>(base: string, path: string, body: unknown, signal?: Ab
 // protojson encodes int64 as strings; turn numeric strings of known int64
 // fields back into numbers so the UI can do arithmetic on them.
 const int64Keys = new Set([
+  'matchedRows',
   'startUnix',
   'endUnix',
   'timestamps',
@@ -106,7 +108,7 @@ export const api = {
     post<TimeSeriesResponse>('/activity/timeseries', p, signal),
 
   top: (
-    p: { targetId: number; range: TimeRange; slicing: TopSlicing; subSlicing?: TopSlicing; filters: Filter[]; excludeSelf: boolean },
+    p: { targetId: number; range: TimeRange; slicing: TopSlicing; subSlicing?: TopSlicing; filters: Filter[]; excludeSelf: boolean; tableFilters?: Filter[]; aas?: MetricRange; percent?: MetricRange; pageSize?: number; offset?: number },
     signal?: AbortSignal,
   ) => post<TopResponse>('/activity/top', p, signal),
 
@@ -122,7 +124,7 @@ export const api = {
     post<QueryTextResponse>('/activity/query-text', { targetId, queryHash }, signal),
 
   profile: (
-    p: { targetId: number; range: TimeRange; dimensions: Dimension[]; filters: Filter[]; excludeSelf: boolean; minSamples?: number },
+    p: { targetId: number; range: TimeRange; dimensions: Dimension[]; filters: Filter[]; excludeSelf: boolean; minSamples?: number; maxPaths?: number },
     signal?: AbortSignal,
   ) => post<ProfileResponse>('/activity/profile', p, signal),
 }

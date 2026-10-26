@@ -1,31 +1,28 @@
+import { SelectChevron } from './activity/select-chevron'
 import { useState } from 'react'
 import type { Dimension } from '../api/types'
 import { DIMENSIONS } from '../api/client'
-
+import { DesignedSelect } from './activity/designed-select'
+import { dateInput, validatePeriod } from './activity/range-model'
 export const PERIODS = [
   { seconds: 60, label: '1 мин' },
   { seconds: 300, label: '5 мин' },
   { seconds: 900, label: '15 мин' },
-  { seconds: 1800, label: '30 мин' },
   { seconds: 3600, label: '1 час' },
-  { seconds: 6 * 3600, label: '6 часов' },
-  { seconds: 24 * 3600, label: '1 день' },
+  { seconds: 86400, label: '24 часа' },
 ]
-
 export const REFRESH = [
-  { seconds: 0, label: 'выкл' },
-  { seconds: 5, label: '5 секунд' },
-  { seconds: 10, label: '10 секунд' },
-  { seconds: 30, label: '30 секунд' },
-  { seconds: 60, label: '1 минута' },
+  { seconds: 0, label: 'Обновление выкл.' },
+  { seconds: 5, label: 'Каждые 5 с' },
+  { seconds: 10, label: 'Каждые 10 с' },
+  { seconds: 30, label: 'Каждые 30 с' },
+  { seconds: 60, label: 'Каждую минуту' },
 ]
-
 export interface Period {
-  seconds: number // preset length; 0 = custom
+  seconds: number
   start?: number
   end?: number
 }
-
 interface Props {
   period: Period
   onPeriod: (p: Period) => void
@@ -35,93 +32,173 @@ interface Props {
   onRefresh: (s: number) => void
   onReload: () => void
   loading: boolean
+  pidAvailable?: boolean
+  onFullscreen?: () => void
+  fullscreen?: boolean
 }
-
-function toLocalInput(unix: number): string {
-  const d = new Date(unix * 1000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-export function Controls({ period, onPeriod, dimension, onDimension, refresh, onRefresh, onReload, loading }: Props) {
+export function Controls({
+  period,
+  onPeriod,
+  dimension,
+  onDimension,
+  refresh,
+  onRefresh,
+  onReload,
+  loading,
+  pidAvailable = true,
+  onFullscreen,
+  fullscreen,
+}: Props) {
   const [custom, setCustom] = useState(false)
-  const now = Math.floor(Date.now() / 1000)
-  const [start, setStart] = useState(toLocalInput(period.start ?? now - 3600))
-  const [end, setEnd] = useState(toLocalInput(period.end ?? now))
-
-  const applyCustom = () => {
-    const s = Math.floor(new Date(start).getTime() / 1000)
-    const e = Math.floor(new Date(end).getTime() / 1000)
-    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return
-    onPeriod({ seconds: 0, start: s, end: e })
+  const [start, setStart] = useState(''),
+    [end, setEnd] = useState(''),
+    [error, setError] = useState('')
+  const apply = () => {
+    const result = validatePeriod(start, end)
+    if (typeof result === 'string') {
+      setError(result)
+      return
+    }
+    onPeriod({ seconds: 0, start: result.startUnix, end: result.endUnix })
     setCustom(false)
   }
-
   return (
-    <div className="controls">
-      <div className="control">
-        <div className="control-label">Период</div>
-        <div className="btn-group">
+    <div className="focus-controls">
+      <div className="period-control">
+        <div
+          className="btn-group period-group"
+          role="group"
+          aria-label="Период запроса"
+        >
           {PERIODS.map((p) => (
             <button
+              type="button"
               key={p.seconds}
+              aria-pressed={period.seconds === p.seconds}
               className={`btn ${period.seconds === p.seconds ? 'active' : ''}`}
-              onClick={() => onPeriod({ seconds: p.seconds })}
+              onClick={() => {
+                setCustom(false)
+                onPeriod({ seconds: p.seconds })
+              }}
             >
               {p.label}
             </button>
           ))}
-          <button className={`btn ${period.seconds === 0 ? 'active' : ''}`} onClick={() => setCustom((v) => !v)}>
-            <span className="icon">◷</span> Указать
+          <button
+            type="button"
+            className={`btn ${!period.seconds ? 'active' : ''}`}
+            aria-expanded={custom}
+            onClick={() => {
+              const now = Math.floor(Date.now() / 1000)
+              setStart(dateInput(period.start ?? now - period.seconds))
+              setEnd(dateInput(period.end ?? now))
+              setError('')
+              setCustom(!custom)
+            }}
+          >
+            Произвольный <SelectChevron />
           </button>
         </div>
         {custom && (
-          <div className="popover">
+          <form
+            className="popover period-popover"
+            aria-label="Произвольный период"
+            onSubmit={(e) => {
+              e.preventDefault()
+              apply()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setCustom(false)
+              }
+            }}
+          >
+            <strong>Произвольный период</strong>
+            <span className="muted">Дата и время · UTC+3</span>
             <label>
               Начало
-              <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+              <input
+                autoFocus
+                type="datetime-local"
+                step="1"
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+                required
+              />
             </label>
             <label>
               Конец
-              <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+              <input
+                type="datetime-local"
+                step="1"
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+                required
+              />
             </label>
+            {error && (
+              <div role="alert" className="error">
+                {error}
+              </div>
+            )}
             <div className="popover-actions">
-              <button className="btn" onClick={() => setCustom(false)}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setCustom(false)}
+              >
                 Отмена
               </button>
-              <button className="btn primary" onClick={applyCustom}>
-                Применить
+              <button type="submit" className="btn primary">
+                Применить период
               </button>
             </div>
-          </div>
+          </form>
         )}
       </div>
-
-      <div className="control">
-        <div className="control-label">Разрез</div>
-        <select className="select" value={dimension} onChange={(e) => onDimension(e.target.value as Dimension)}>
-          {DIMENSIONS.map((d) => (
-            <option key={d.key} value={d.key}>
-              {d.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="control control-right">
-        <div className="control-label">Автообновление</div>
-        <div className="row">
-          <select className="select" value={refresh} onChange={(e) => onRefresh(Number(e.target.value))}>
-            {REFRESH.map((r) => (
-              <option key={r.seconds} value={r.seconds}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-          <button className={`btn icon-btn ${loading ? 'spinning' : ''}`} onClick={onReload} title="Перезагрузка" aria-label="Перезагрузка">
-            ↻
-          </button>
+      <DesignedSelect
+        label="Разрез графиков"
+        value={dimension}
+        onChange={(v) => onDimension(v as Dimension)}
+        options={DIMENSIONS.map((d) => ({
+          value: d.key,
+          label: d.label,
+          disabled: d.key === 'PID' && !pidAvailable,
+        }))}
+      />
+      <div className="focus-actions">
+        <div className="refresh-control">
+          <DesignedSelect
+            label="Автообновление"
+            value={String(refresh)}
+            options={REFRESH.map((r) => ({
+              value: String(r.seconds),
+              label: r.label,
+            }))}
+            onChange={(v) => onRefresh(Number(v))}
+          />
         </div>
+        <button
+          type="button"
+          className="btn icon-btn"
+          onClick={onReload}
+          aria-label="Обновить данные"
+        >
+          <span className={loading ? 'spinning' : ''}>↻</span>
+        </button>
+        <button
+          type="button"
+          className="btn icon-btn"
+          onClick={onFullscreen}
+          aria-label={
+            fullscreen
+              ? 'Выйти из полного экрана'
+              : 'Весь дашборд на полный экран'
+          }
+        >
+          {fullscreen ? '⊡' : '⛶'}
+        </button>
       </div>
     </div>
   )

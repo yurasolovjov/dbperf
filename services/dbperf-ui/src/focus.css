@@ -1,0 +1,1196 @@
+/* Focus dashboard. Tailwind utilities compose layout; these rules own chart geometry and existing components. */
+button,
+input {
+  font: inherit;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.sidebar {
+  width: 196px;
+  padding: 16px 10px;
+}
+.sidebar .brand {
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--text);
+}
+.sidebar .search {
+  min-width: 0;
+}
+.target-list .sub {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar .nav-link {
+  font-size: 11px;
+  padding: 8px 4px;
+}
+.sidebar .target-list li a {
+  padding-left: 4px;
+  padding-right: 4px;
+  font-size: 11px;
+}
+.sidebar .meta {
+  font-size: 9px;
+}
+.focus-dashboard {
+  max-width: 1800px;
+  gap: 6px;
+  padding: 12px 20px 16px;
+}
+.focus-dashboard h1,
+.focus-dashboard h2,
+.focus-dashboard p {
+  margin: 0;
+}
+.focus-dashboard h1 {
+  font-size: 21px;
+  line-height: 1.3;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+.focus-dashboard h2 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.focus-dashboard .topbar {
+  font-size: 10px;
+}
+.focus-dashboard .status {
+  font-size: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.focus-dashboard .crumbs {
+  min-width: 0;
+}
+.focus-dashboard .topbar .select-trigger {
+  border: 0;
+  background: none;
+  padding: 2px;
+  min-height: 22px;
+}
+.focus-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 1px 0 3px;
+}
+.eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.3px;
+  color: var(--muted);
+  margin-bottom: 3px !important;
+}
+.focus-badge {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+.focus-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.period-control {
+  position: relative;
+}
+.period-group {
+  padding: 2px;
+  flex-wrap: wrap;
+}
+.period-group .btn {
+  font-size: 11px;
+  padding: 5px 10px;
+  min-height: 28px;
+}
+.focus-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+.focus-actions .select-trigger {
+  min-width: 125px;
+  font-size: 10px;
+}
+.period-context {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+.period-context [role='status'] {
+  color: var(--muted);
+}
+.designed-select {
+  position: relative;
+  min-width: 0;
+}
+.select-trigger {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  min-height: 34px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.select-trigger > span {
+  color: var(--muted);
+}
+.select-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(310px, calc(100vw - 40px));
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px;
+  background: var(--card);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.select-menu button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.select-menu button:hover,
+.select-menu button:focus {
+  background: var(--accent-bg);
+  outline: 0;
+}
+.select-menu button[aria-selected='true'] {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.focus-actions .select-menu {
+  left: auto;
+  right: 0;
+}
+.focus-dashboard .popover {
+  z-index: 60;
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--accent) 8%, transparent);
+  gap: 10px;
+  padding: 16px;
+}
+.period-popover {
+  width: 330px;
+  max-width: calc(100vw - 32px);
+}
+.popover input {
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  background: var(--card);
+  color: var(--text);
+}
+.popover label {
+  font-weight: 400;
+}
+.focus-charts {
+  padding: 0;
+  overflow: visible;
+}
+.overview-block {
+  background: var(--surface-raised);
+  border-radius: 9px 9px 0 0;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 14px 1px;
+}
+.chart-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 9px;
+}
+.chart-heading h2 {
+  font-size: 10px;
+  color: var(--muted);
+}
+.range-caption {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.focus-plot {
+  position: relative;
+  width: 100%;
+  isolation: isolate;
+}
+.focus-plot > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.overview-plot {
+  height: 60px;
+}
+.detail-plot {
+  height: clamp(112px, calc(22dvh - 50px), 176px);
+}
+.brush-track {
+  position: absolute;
+  left: 36px;
+  right: 12px;
+  top: 8px;
+  bottom: 24px;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+.brush-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-inline: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  cursor: grab;
+  min-width: 2px;
+  touch-action: none;
+}
+.brush-window:active {
+  cursor: grabbing;
+}
+.brush-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  border: 0;
+  background: none;
+  cursor: ew-resize;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  padding: 0;
+  z-index: 2;
+}
+.brush-handle.start {
+  left: -11px;
+}
+.brush-handle.end {
+  right: -11px;
+}
+.brush-handle span {
+  width: 7px;
+  height: 26px;
+  background: var(--card);
+  border: 1.5px solid var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.brush-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 9px;
+  min-height: 18px;
+}
+.brush-actions > button:not(.link) {
+  width: 22px;
+  height: 20px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.brush-actions > button:hover {
+  background: var(--surface-raised);
+}
+.brush-actions > span {
+  min-width: 30px;
+  text-align: center;
+  color: var(--muted);
+}
+.brush-actions > .link {
+  font-size: 9px;
+  margin-left: 6px;
+}
+.plot-tooltip {
+  position: absolute;
+  top: 8px;
+  left: 45px;
+  pointer-events: none;
+  background: var(--surface-raised);
+  color: var(--card);
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.chart-empty {
+  position: absolute;
+  inset: 25% 15%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  pointer-events: none;
+}
+.detail-block {
+  padding: 8px 14px 0;
+}
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.detail-title-row h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.detail-title-row small {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.detail-mark {
+  width: 3px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.detail-title-row .btn {
+  font-size: 10px;
+  padding: 3px 8px;
+}
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 3px 0;
+  min-width: 0;
+}
+.detail-toolbar > .range-caption {
+  margin: 0;
+}
+.focus-legend {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  white-space: nowrap;
+}
+.total-line-label {
+  font-size: 9px;
+  color: var(--accent);
+  flex: none;
+}
+.legend-item {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex: none;
+  max-width: 150px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+}
+.legend-item[aria-pressed='true'] {
+  background: var(--accent-bg);
+  border-color: var(--border);
+  color: var(--accent);
+}
+.legend-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legend-item .sw {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+.legend-item.dimmed {
+  opacity: 0.4;
+}
+.analysis-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 22px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.analysis-caption strong {
+  font-size: 10px;
+  color: var(--text);
+}
+.selection-dot {
+  background: var(--accent);
+  border-radius: 2px;
+  width: 6px;
+  height: 6px;
+}
+.dashboard-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding: 5px 0;
+  font-size: 10px;
+  min-height: 28px;
+}
+.dashboard-filter-row .filters {
+  min-width: 0;
+  gap: 5px;
+}
+.dashboard-filter-row .chip {
+  font-size: 10px;
+  max-width: 260px;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-x {
+  flex: none;
+}
+.chart-options {
+  display: flex;
+  gap: 12px;
+  flex: none;
+  color: var(--muted);
+  align-items: center;
+}
+.chart-options input {
+  accent-color: var(--accent);
+}
+.focus-summary {
+  padding: 4px 14px 6px;
+}
+.focus-summary > div {
+  border-left: 1px solid var(--border);
+  padding-left: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.focus-summary > div:first-child {
+  border: 0;
+  padding-left: 0;
+}
+.focus-summary span {
+  flex-basis: 100%;
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 12px;
+}
+.focus-summary strong {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 21px;
+}
+.focus-summary small {
+  font-size: 9px;
+  color: var(--muted);
+}
+.focus-table {
+  padding: 0;
+}
+.focus-table-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px 3px;
+  min-width: 0;
+}
+.focus-table-head h2 {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.focus-table-head .tabs {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  background: none;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  display: flex;
+}
+.focus-table-head .tab {
+  flex: none;
+  font-size: 10px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.focus-table-head .tab.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: none;
+}
+.focus-table-head .unit-toggle {
+  flex: none;
+}
+.focus-table-head .unit-toggle .btn {
+  font-size: 10px;
+  padding: 2px 7px;
+}
+.focus-table-scroll {
+  overflow-x: auto;
+}
+.focus-table .top-table {
+  min-width: 580px;
+}
+.focus-table th {
+  font-size: 10px;
+  padding: 4px 10px;
+  position: relative;
+}
+.focus-table td {
+  font-size: 11px;
+  padding: 6px 10px;
+  height: 31px;
+}
+.focus-table .col-activity {
+  width: 230px;
+}
+.focus-table .col-exp {
+  width: 28px;
+}
+.focus-table .col-metric {
+  width: 90px;
+  font-variant-numeric: tabular-nums;
+}
+.column-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+}
+.column-filter {
+  position: static;
+}
+.column-filter-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  border-radius: 4px;
+  width: 23px;
+  height: 23px;
+  padding: 3px;
+  cursor: pointer;
+}
+.column-filter-button.active,
+.column-filter-button:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--border);
+}
+.column-popover {
+  top: auto;
+  left: auto;
+  right: 12px;
+  width: 300px;
+  max-width: calc(100vw - 40px);
+  font-size: 12px;
+  font-weight: 400;
+}
+.numeric-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.table-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 10px;
+}
+.table-filter-bar .chip {
+  font-size: 10px;
+  border-radius: 4px;
+  max-width: 260px;
+}
+.focus-table .bar {
+  border: 0;
+  padding: 0;
+  background: none;
+  height: 13px;
+  flex-shrink: 1;
+}
+.focus-table .value {
+  font-size: 10px;
+  min-width: 42px;
+}
+.focus-table .query-link {
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  text-align: left;
+}
+.focus-table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  color: var(--muted);
+  font-size: 9px;
+  border-top: 1px solid var(--border);
+}
+.focus-table-footer .row {
+  gap: 5px;
+}
+.focus-table-footer .btn {
+  padding: 2px 6px;
+}
+.profile-view {
+  padding: 5px 0 10px;
+}
+.profile-level-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--muted);
+  margin: 8px 0;
+}
+.profile-level-label > span {
+  font-size: 9px;
+  color: var(--muted);
+}
+.profile-query-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 0;
+}
+.profile-node {
+  display: flex;
+  flex-basis: 180px;
+  flex-shrink: 0;
+  min-width: min(180px, 100%);
+  max-width: 100%;
+  height: 38px;
+  border: 1px solid;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.profile-node-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+.profile-node-main > span {
+  font:
+    10px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-node-main small {
+  font-size: 9px;
+  flex: none;
+}
+.profile-node-action {
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 8%, transparent);
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0 5px;
+}
+.profile-node button:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.profile-breadcrumb {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10px;
+}
+.profile-empty {
+  padding: 40px;
+  text-align: center;
+}
+.dim-order {
+  font-size: 10px;
+  margin: 6px 0;
+}
+.dim-order .chip {
+  font-size: 10px;
+}
+.dim-order .select-trigger {
+  font-size: 10px;
+  padding: 3px 8px;
+  min-height: 26px;
+}
+.sql-dialog {
+  display: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.sql-dialog[open] {
+  display: flex;
+}
+.sql-dialog::backdrop {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.sql-dialog .sql {
+  max-height: 50vh;
+  overflow: auto;
+}
+.sql-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  font-size: 11px;
+}
+.sql-dialog .modal-head {
+  overflow-wrap: anywhere;
+}
+.focus-dashboard:fullscreen,
+.focus-dashboard.dashboard-fullscreen {
+  background: var(--surface-raised);
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 24px;
+  display: flex;
+}
+.focus-dashboard.dashboard-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.focus-dashboard:fullscreen .detail-plot,
+.focus-dashboard.dashboard-fullscreen .detail-plot {
+  height: clamp(120px, 22dvh, 220px);
+}
+@media (min-width: 1024px) and (max-height: 820px) {
+  .focus-dashboard {
+    padding-top: 8px;
+    gap: 4px;
+  }
+  .focus-dashboard h1 {
+    font-size: 19px;
+  }
+  .detail-plot {
+    height: 100px;
+  }
+  .overview-plot {
+    height: 52px;
+  }
+  .focus-table td {
+    height: 28px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .focus-heading {
+    margin: 0;
+  }
+  .focus-summary {
+    padding-block: 2px;
+  }
+  .focus-dashboard .status-detail {
+    display: none;
+  }
+  .detail-block {
+    padding-top: 5px;
+  }
+}
+@media (max-width: 1200px) {
+  .focus-controls {
+    gap: 7px;
+  }
+  .period-group .btn {
+    padding-inline: 7px;
+  }
+  .focus-actions {
+    margin-left: 0;
+  }
+  .focus-table-head {
+    flex-wrap: wrap;
+  }
+  .focus-table-head h2 {
+    flex: 1;
+  }
+  .focus-table-head .tabs {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .focus-table .col-activity {
+    width: 190px;
+  }
+}
+@media (max-width: 1023px) {
+  .layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 7px 12px;
+  }
+  .sidebar .sidebar-head {
+    gap: 10px;
+  }
+  .sidebar .search,
+  .sidebar .target-list {
+    display: none;
+  }
+  .sidebar.collapsed {
+    width: 100%;
+  }
+  .sidebar .nav-link {
+    margin-left: auto;
+  }
+  .sidebar .brand {
+    display: block !important;
+  }
+  .sidebar .sidebar-head .icon-btn {
+    display: none;
+  }
+  .sidebar.collapsed .nav-link {
+    display: flex;
+  }
+  .focus-dashboard {
+    padding: 12px;
+    gap: 7px;
+  }
+  .detail-plot {
+    height: 160px;
+  }
+  .focus-summary > div {
+    padding-left: 0;
+    border: 0;
+  }
+  .focus-dashboard .status-detail {
+    display: none;
+  }
+  .focus-table-head .tabs {
+    order: 3;
+  }
+  .focus-table-head {
+    gap: 6px;
+  }
+  .focus-summary {
+    padding: 5px 10px;
+  }
+  .period-context {
+    font-size: 9px;
+  }
+  .focus-dashboard .topbar {
+    gap: 6px;
+  }
+  .focus-dashboard .crumbs {
+    flex-wrap: wrap;
+  }
+  .focus-table-footer {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 600px) {
+  .focus-dashboard {
+    padding: 10px;
+    gap: 8px;
+  }
+  .focus-heading h1 {
+    font-size: 20px;
+  }
+  .focus-dashboard .topbar {
+    align-items: flex-start;
+  }
+  .focus-dashboard .topbar .crumb-current {
+    display: none;
+  }
+  .focus-dashboard .topbar .crumb-sep {
+    display: none;
+  }
+  .focus-dashboard .status {
+    max-width: 110px;
+    font-size: 9px;
+  }
+  .focus-controls {
+    gap: 8px;
+  }
+  .period-control {
+    width: 100%;
+  }
+  .period-group {
+    width: 100%;
+  }
+  .period-group .btn {
+    font-size: 10px;
+    flex: 1;
+    padding-inline: 6px;
+  }
+  .period-group .btn:last-child {
+    flex-basis: 100%;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+  }
+  .focus-controls > .designed-select .select-trigger {
+    font-size: 11px;
+    min-width: 125px;
+  }
+  .focus-actions {
+    margin-left: auto;
+    gap: 4px;
+  }
+  .focus-actions .select-trigger {
+    min-width: 95px;
+    font-size: 9px;
+    padding-inline: 5px;
+    gap: 5px;
+  }
+  .focus-actions .icon-btn {
+    width: 28px;
+    height: 30px;
+  }
+  .period-context {
+    gap: 4px;
+  }
+  .overview-block {
+    padding: 8px 9px 1px;
+  }
+  .chart-heading > .muted {
+    display: none;
+  }
+  .chart-heading .range-caption {
+    font-size: 9px;
+  }
+  .detail-block {
+    padding: 9px 9px 0;
+  }
+  .detail-title-row h2 {
+    font-size: 12px;
+  }
+  .detail-title-row .btn {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+  .detail-title-row small {
+    display: none;
+  }
+  .detail-toolbar {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .focus-legend {
+    flex-basis: 100%;
+  }
+  .detail-plot {
+    height: 164px;
+  }
+  .overview-plot {
+    height: 64px;
+  }
+  .brush-handle {
+    width: 26px;
+  }
+  .brush-handle.start {
+    left: -14px;
+  }
+  .brush-handle.end {
+    right: -14px;
+  }
+  .analysis-caption {
+    font-size: 9px;
+    gap: 4px;
+  }
+  .dashboard-filter-row {
+    flex-wrap: wrap;
+    font-size: 9px;
+  }
+  .dashboard-filter-row .filters {
+    width: 100%;
+  }
+  .chart-options {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .focus-summary strong {
+    font-size: 17px;
+  }
+  .focus-table-head h2 {
+    font-size: 12px;
+  }
+  .focus-table .col-activity {
+    width: 180px;
+  }
+  .sql-dialog-footer {
+    flex-wrap: wrap;
+  }
+  .sql-dialog-footer > .row {
+    margin-left: auto;
+  }
+  .focus-dashboard:fullscreen,
+  .focus-dashboard.dashboard-fullscreen {
+    padding: 10px;
+  }
+  .column-popover {
+    position: fixed;
+    top: 25dvh;
+    left: 16px;
+    right: 16px;
+    margin: 0;
+    width: auto;
+  }
+  .period-popover {
+    width: 100%;
+  }
+  .profile-level-label {
+    flex-wrap: wrap;
+  }
+}
+
+@media (min-width: 1024px) {
+  .sidebar.collapsed > .nav-link {
+    display: none;
+  }
+}
+@media (min-width: 1024px) {
+  .focus-table-head {
+    flex-wrap: nowrap;
+  }
+  .focus-table-head h2 {
+    flex: none;
+  }
+  .focus-table-head .tabs {
+    order: 0;
+    flex: 1;
+  }
+}
+@media (min-width: 1024px) and (max-height: 820px) {
+  .focus-heading { align-items: center; }
+  .focus-heading .eyebrow { display: none; }
+  .focus-heading h1 { line-height: 1.25; }
+}
+@media (min-width: 1024px) {
+  .overview-block,
+  .detail-block {
+    position: relative;
+  }
+  .overview-block .brush-actions {
+    position: absolute;
+    top: 1px;
+    right: 145px;
+  }
+  .detail-block .brush-actions {
+    position: absolute;
+    bottom: 34px;
+    right: 14px;
+  }
+  .analysis-caption {
+    padding-right: 220px;
+  }
+  .focus-table-head {
+    padding-top: 4px;
+    padding-bottom: 2px;
+  }
+  .focus-table th {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  .focus-table .column-filter-button {
+    width: 18px;
+    height: 18px;
+  }
+  .focus-table-footer {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+}
+
+.select-menu {
+  z-index: 80;
+}
+.column-popover {
+  z-index: 60;
+}

@@ -1,166 +1,341 @@
-import { useState } from 'react'
-import type { Dimension, TopEntry, TopResponse } from '../api/types'
+import { Skeleton } from './activity/skeleton'
+import { Fragment, useState } from 'react'
+import type { Dimension, TableFilters, TopResponse } from '../api/types'
 import { DIMENSIONS } from '../api/client'
-import { waitTypeColor } from '../lib/colors'
+import { waitCssColor as waitTypeColor } from '../lib/colors'
 import { fmtNum, sliceLabel } from '../lib/format'
-
+import { ColumnFilter } from './activity/column-filter'
 export type Unit = 'AAS' | 'PERCENT'
-
 interface Props {
   dimension: Dimension
   onDimension: (d: Dimension) => void
   data: TopResponse | null
   error: string | null
+  loading: boolean
   unit: Unit
   onUnit: (u: Unit) => void
   onFilter: (dimension: Dimension, value: string) => void
   onQueryText: (hash: string) => void
   rawLevel: boolean
+  filters: TableFilters
+  onFilters: (f: TableFilters) => void
+  offset: number
+  onOffset: (v: number) => void
+  pageSize: number
 }
-
-// TopTable is the "top activities" table: one row per slice value with a bar
-// split by wait type (the nested slice), a value in AAS or percent, and the
-// value of the dimension. Rows expand to the nested breakdown.
-export function TopTable({ dimension, onDimension, data, error, unit, onUnit, onFilter, onQueryText, rawLevel }: Props) {
+export function TopTable({
+  dimension,
+  onDimension,
+  data,
+  error,
+  loading,
+  unit,
+  onUnit,
+  onFilter,
+  onQueryText,
+  rawLevel,
+  filters,
+  onFilters,
+  offset,
+  onOffset,
+  pageSize,
+}: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set())
-  const column = DIMENSIONS.find((d) => d.key === dimension)?.column ?? ''
-  const max = Math.max(0, ...(data?.entries ?? []).map((e) => (unit === 'AAS' ? e.aas : e.percent)))
-
-  const toggle = (v: string) =>
+  const column =
+    DIMENSIONS.find((d) => d.key === dimension)?.column ?? dimension
+  const metric = unit === 'AAS' ? 'aas' : 'percent',
+    other = unit === 'AAS' ? 'percent' : 'aas'
+  const max = Math.max(0, ...(data?.entries ?? []).map((e) => e[metric]))
+  const toggle = (key: string) =>
     setOpen((s) => {
       const n = new Set(s)
-      if (n.has(v)) n.delete(v)
-      else n.add(v)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
       return n
     })
-
+  const hasFilters =
+    filters.dimensions.length > 0 || filters.aas || filters.percent
   return (
-    <div className="card">
-      <div className="tabs-row">
-        <div className="tabs">
-          {DIMENSIONS.filter((d) => rawLevel || d.key !== 'PID').map((d) => (
-            <button key={d.key} className={`tab ${d.key === dimension ? 'active' : ''}`} onClick={() => onDimension(d.key)}>
+    <section
+      className="card focus-table"
+      aria-label="Таблица активности"
+      aria-busy={loading}
+    >
+      <div className="focus-table-head">
+        <h2>Активность по разрезам</h2>
+        <div className="tabs" role="tablist" aria-label="Разрез таблицы">
+          {DIMENSIONS.map((d) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={d.key === dimension}
+              key={d.key}
+              disabled={!rawLevel && d.key === 'PID'}
+              className={`tab ${d.key === dimension ? 'active' : ''}`}
+              onClick={() => {
+                setOpen(new Set())
+                onDimension(d.key)
+              }}
+            >
               {d.label}
             </button>
           ))}
         </div>
-        <div className="unit-toggle" role="group" aria-label="Единица измерения">
-          <button className={`btn small ${unit === 'AAS' ? 'active' : ''}`} onClick={() => onUnit('AAS')} title="Среднее количество активных сессий">
-            СКАС
+        <div className="unit-toggle" role="group" aria-label="Единица таблицы">
+          {(['AAS', 'PERCENT'] as Unit[]).map((u) => (
+            <button
+              type="button"
+              key={u}
+              className={`btn small ${unit === u ? 'active' : ''}`}
+              aria-pressed={unit === u}
+              onClick={() => onUnit(u)}
+            >
+              {u === 'AAS' ? 'AAS' : '%'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {hasFilters && (
+        <div className="table-filter-bar">
+          <span className="muted">Фильтры таблицы:</span>
+          {filters.dimensions.map((f) => (
+            <span className="chip" key={f.dimension}>
+              <span>
+                {DIMENSIONS.find((d) => d.key === f.dimension)?.label}:{' '}
+                {f.exclude
+                  ? 'не содержит'
+                  : f.match === 'MATCH_TEXT_EQUALS'
+                    ? '='
+                    : 'содержит'}{' '}
+                {f.values.join(', ')}
+              </span>
+              <button
+                type="button"
+                className="chip-x"
+                aria-label={`Убрать фильтр ${f.dimension}`}
+                onClick={() =>
+                  onFilters({
+                    ...filters,
+                    dimensions: filters.dimensions.filter((x) => x !== f),
+                  })
+                }
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {(['aas', 'percent'] as const).map(
+            (m) =>
+              filters[m] && (
+                <span className="chip" key={m}>
+                  {m === 'aas' ? 'AAS' : '%'}: {filters[m]?.min ?? '0'} —{' '}
+                  {filters[m]?.max ?? '∞'}
+                  <button
+                    type="button"
+                    className="chip-x"
+                    aria-label={`Убрать фильтр ${m}`}
+                    onClick={() => onFilters({ ...filters, [m]: undefined })}
+                  >
+                    ×
+                  </button>
+                </span>
+              ),
+          )}
+          <button
+            type="button"
+            className="link"
+            onClick={() => onFilters({ dimensions: [] })}
+          >
+            Сбросить
           </button>
-          <button className={`btn small ${unit === 'PERCENT' ? 'active' : ''}`} onClick={() => onUnit('PERCENT')} title="Доля от общей активности">
-            %
+        </div>
+      )}
+      {error && !loading && (
+        <div role="alert" className="error">
+          {error}
+        </div>
+      )}
+      {loading && <span className="sr-only" role="status" aria-label="Загрузка таблицы">Загружаем активность…</span>}
+      <div className="focus-table-scroll">
+        <table className="top-table">
+          <thead>
+            <tr>
+              <th className="col-exp" />
+              <th className="col-activity">
+                <div className="column-heading">
+                  Активность, {unit === 'AAS' ? 'AAS' : '%'}
+                  <ColumnFilter
+                    key={metric}
+                    column={metric}
+                    title={unit === 'AAS' ? 'AAS' : 'Доля, %'}
+                    value={filters}
+                    onChange={onFilters}
+                  />
+                </div>
+              </th>
+              <th>
+                <div className="column-heading">
+                  {column}
+                  <ColumnFilter
+                    key={dimension}
+                    column={dimension}
+                    title={column}
+                    value={filters}
+                    onChange={onFilters}
+                  />
+                </div>
+              </th>
+              <th className="col-metric">
+                <div className="column-heading">
+                  {other === 'aas' ? 'AAS' : '%'}
+                  <ColumnFilter
+                    key={other}
+                    column={other}
+                    title={other === 'aas' ? 'AAS' : 'Доля, %'}
+                    value={filters}
+                    onChange={onFilters}
+                  />
+                </div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? Array.from({ length: Math.max(1, Math.min(pageSize, data?.entries.length || pageSize)) }, (_, index) => (
+              <tr className="table-skeleton-row" key={index} aria-hidden="true">
+                <td />
+                <td><Skeleton wide /></td>
+                <td className="col-label"><Skeleton wide /></td>
+                <td className="col-metric"><Skeleton /></td>
+              </tr>
+            )) : <>
+            {(data?.entries ?? []).map((e) => {
+              const key = `${dimension}:${e.slice.value}`,
+                label = sliceLabel(dimension, e.slice)
+              const segments = e.sub.length
+                ? e.sub
+                : [{ slice: e.slice, percent: 100 }]
+              return (
+                <Fragment key={key}>
+                  <tr>
+                    <td>
+                      {e.sub.length > 0 && (
+                        <button
+                          type="button"
+                          className="expander"
+                          aria-label={`${open.has(key) ? 'Свернуть' : 'Развернуть'} ${label}`}
+                          aria-expanded={open.has(key)}
+                          onClick={() => toggle(key)}
+                        >
+                          {open.has(key) ? '⌄' : '›'}
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      <div className="bar-cell">
+                        <button
+                          type="button"
+                          className="bar"
+                          aria-label={`Фильтр дашборда: ${label}`}
+                          onClick={() =>
+                            !e.slice.isRemainder &&
+                            onFilter(dimension, e.slice.value)
+                          }
+                          style={{
+                            width: `${max ? Math.max(2, (e[metric] / max) * 100) : 0}%`,
+                          }}
+                        >
+                          {segments.map((s, i) => (
+                            <span
+                              key={i}
+                              className="seg"
+                              style={{
+                                flex: s.percent || 1,
+                                background: waitTypeColor(s.slice.value),
+                              }}
+                            />
+                          ))}
+                        </button>
+                        <span className="value">{fmtNum(e[metric])}</span>
+                      </div>
+                    </td>
+                    <td className="col-label" title={label}>
+                      {dimension === 'QUERY' && !e.slice.isRemainder ? (
+                        <button
+                          type="button"
+                          className="link query-link"
+                          onClick={() => onQueryText(e.slice.value)}
+                        >
+                          {label}
+                        </button>
+                      ) : (
+                        label
+                      )}
+                    </td>
+                    <td className="col-metric">{fmtNum(e[other])}</td>
+                  </tr>
+                  {open.has(key) &&
+                    e.sub.map((s, i) => (
+                      <tr className="sub-row" key={i}>
+                        <td />
+                        <td>
+                          <span
+                            className="sw"
+                            style={{ background: waitTypeColor(s.slice.value) }}
+                          />{' '}
+                          {fmtNum(unit === 'AAS' ? s.aas : s.percent)}
+                          {unit === 'PERCENT' ? '% строки' : ''}
+                        </td>
+                        <td>{s.slice.value}</td>
+                        <td>{fmtNum(unit === 'AAS' ? s.percent : s.aas)}</td>
+                      </tr>
+                    ))}
+                </Fragment>
+              )
+            })}
+            {!data?.entries.length && (
+              <tr>
+                <td colSpan={4} className="center muted">
+                  {error
+                      ? 'Данные недоступны'
+                      : 'Нет значений за этот интервал с выбранными фильтрами'}
+                </td>
+              </tr>
+            )}
+            </>}
+          </tbody>
+        </table>
+      </div>
+      <div className="focus-table-footer">
+        <span>
+          {loading ? <Skeleton wide /> : <>Всего {fmtNum(data?.totalAas ?? 0)} AAS · снимков{' '}
+          {data?.nSamples ?? 0} · {data?.level ?? '—'}</>}
+        </span>
+        <div className="row">
+          <span>
+            {loading ? <Skeleton /> : data?.matchedRows
+              ? `${offset + 1}–${Math.min(offset + pageSize, data.matchedRows)} из ${data.matchedRows}`
+              : '0 строк'}
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!offset || loading}
+            aria-label="Предыдущая страница"
+            onClick={() => onOffset(Math.max(0, offset - pageSize))}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={loading || offset + pageSize >= (data?.matchedRows ?? 0)}
+            aria-label="Следующая страница"
+            onClick={() => onOffset(offset + pageSize)}
+          >
+            ›
           </button>
         </div>
       </div>
-      {error && <div className="error">{error}</div>}
-      <table className="top-table">
-        <thead>
-          <tr>
-            <th className="col-exp" />
-            <th className="col-activity">
-              Активность <span className="muted">{unit === 'AAS' ? 'СКАС' : '%'}</span>
-            </th>
-            <th>{column}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(data?.entries ?? []).map((e) => {
-            const v = unit === 'AAS' ? e.aas : e.percent
-            const key = e.slice.isRemainder ? '__other' : e.slice.value
-            return (
-              <Row
-                key={key}
-                entry={e}
-                value={v}
-                max={max}
-                unit={unit}
-                dimension={dimension}
-                isOpen={open.has(key)}
-                onToggle={() => toggle(key)}
-                onFilter={() => !e.slice.isRemainder && onFilter(dimension, e.slice.value)}
-                onQueryText={() => dimension === 'QUERY' && !e.slice.isRemainder && onQueryText(e.slice.value)}
-              />
-            )
-          })}
-          {data && data.entries.length === 0 && (
-            <tr>
-              <td colSpan={3} className="muted center">
-                Нет активности в выбранном окне
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      {data && (
-        <div className="table-footer muted">
-          Всего СКАС {fmtNum(data.totalAas)} · снимков {data.nSamples}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface RowProps {
-  entry: TopEntry
-  value: number
-  max: number
-  unit: Unit
-  dimension: Dimension
-  isOpen: boolean
-  onToggle: () => void
-  onFilter: () => void
-  onQueryText: () => void
-}
-
-function Row({ entry, value, max, unit, dimension, isOpen, onToggle, onFilter, onQueryText }: RowProps) {
-  const width = max > 0 ? (value / max) * 100 : 0
-  const segments =
-    entry.sub.length > 0 ? entry.sub : [{ slice: { value: 'other', isRemainder: true, shortText: '', id: 0 }, aas: entry.aas, percent: 100, sub: [] }]
-  const label = sliceLabel(dimension, entry.slice)
-  const isQuery = dimension === 'QUERY' && !entry.slice.isRemainder
-  return (
-    <>
-      <tr className={entry.slice.isRemainder ? 'remainder' : ''}>
-        <td className="col-exp">
-          {entry.sub.length > 0 && (
-            <button className="expander" onClick={onToggle} aria-label={isOpen ? 'Свернуть' : 'Развернуть'}>
-              {isOpen ? '⌄' : '›'}
-            </button>
-          )}
-        </td>
-        <td className="col-activity">
-          <div className="bar-cell">
-            <div className="bar" style={{ width: `${width}%` }} title="Клик — добавить фильтр по этому значению" onClick={onFilter}>
-              {segments.map((s, i) => (
-                <span
-                  key={i}
-                  className="seg"
-                  style={{ flex: s.percent, background: waitTypeColor(s.slice.isRemainder ? 'other' : s.slice.value) }}
-                  title={`${s.slice.isRemainder ? 'other' : s.slice.value}: ${fmtNum(s.percent, 1)} %`}
-                />
-              ))}
-            </div>
-            <span className="value">{fmtNum(value)}</span>
-          </div>
-        </td>
-        <td className={`col-label ${isQuery ? 'clickable' : ''}`} onClick={onQueryText} title={isQuery ? 'Показать текст запроса' : label}>
-          {label}
-        </td>
-      </tr>
-      {isOpen &&
-        entry.sub.map((s, i) => (
-          <tr key={i} className="sub-row">
-            <td />
-            <td className="col-activity">
-              <div className="bar-cell">
-                <span className="sw" style={{ background: waitTypeColor(s.slice.isRemainder ? 'other' : s.slice.value) }} />
-                <span className="value">{unit === 'AAS' ? fmtNum(s.aas) : `${fmtNum(s.percent, 1)} % строки`}</span>
-              </div>
-            </td>
-            <td className="col-label muted">{s.slice.isRemainder ? 'other' : s.slice.value}</td>
-          </tr>
-        ))}
-    </>
+    </section>
   )
 }

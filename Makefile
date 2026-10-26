@@ -1,5 +1,5 @@
 # Repo-level targets for the docker-compose bench in deploy/.
-.PHONY: up down logs build-dbperf build-registry build-ui test
+.PHONY: up down logs build-dbperf build-registry build-ui test test-ui
 
 build-dbperf:
 	$(MAKE) -C services/dbperf build-linux
@@ -22,4 +22,7 @@ logs:
 test:
 	$(MAKE) -C services/dbperf test
 	$(MAKE) -C services/registry test
-	cd services/dbperf-ui && npm run typecheck
+	$(MAKE) test-ui
+
+test-ui:
+	cd services/dbperf-ui && npm run test:coverage && npm run typecheck

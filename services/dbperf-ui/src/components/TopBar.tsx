@@ -1,5 +1,5 @@
+import { DesignedSelect } from './activity/designed-select'
 import type { Target, TargetStatus } from '../api/types'
-import { fmtDateTime } from '../lib/format'
 
 interface Props {
   targets: Target[]
@@ -20,28 +20,25 @@ export function TopBar({ targets, targetId, status, onChange }: Props) {
   return (
     <header className="topbar">
       <div className="crumbs">
-        <select className="target-select" value={targetId} onChange={(e) => onChange(Number(e.target.value))}>
-          {targets.map((t) => (
-            <option key={t.targetId} value={t.targetId}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        <span className="crumb-sep">/</span>
-        <span className="crumb-muted">Активность сессии</span>
+        <DesignedSelect
+          label="Объект мониторинга"
+          value={String(targetId)}
+          options={targets.map((t) => ({
+            value: String(t.targetId),
+            label: t.name,
+          }))}
+          onChange={(v) => onChange(Number(v))}
+        />
         <span className="crumb-sep">/</span>
         <span className="crumb-current">Активность сессии</span>
       </div>
       {target && status && (
-        <div className={`status status-${status.state.toLowerCase()}`} title={status.lastError || ''}>
-          <span className="dot" />
-          {status.state === 'STATE_UNSPECIFIED' && status.ownerInstance ? `ведёт ${status.ownerInstance}` : stateLabel[status.state]}
-          {status.lastSampleAt > 0 && <span className="status-detail">· снимок {fmtDateTime(status.lastSampleAt)}</span>}
-          {status.serverVersionNum > 0 && (
-            <span className="status-detail">· PostgreSQL {Math.floor(status.serverVersionNum / 10000)}</span>
-          )}
-          <span className="status-detail">· тик {target.intervalSec} с</span>
-        </div>
+        <span
+          className="focus-badge"
+          title={status.lastError || `${stateLabel[status.state]} · ${status.ownerInstance || 'сборщик не назначен'} · тик ${target.intervalSec} с`}
+        >
+          PostgreSQL{status.serverVersionNum > 0 ? ` ${Math.floor(status.serverVersionNum / 10000)}` : ''}
+        </span>
       )}
     </header>
   )

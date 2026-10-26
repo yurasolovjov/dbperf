@@ -98,3 +98,35 @@ func TestErrorsMapToHTTP(t *testing.T) {
 		t.Fatalf("code %d", rr.Code)
 	}
 }
+
+type fakeTop struct {
+	dbperfv1.UnimplementedActivityServiceServer
+	got *dbperfv1.ActivityTopRequest
+}
+
+func (f *fakeTop) GetActivityTop(_ context.Context, r *dbperfv1.ActivityTopRequest) (*dbperfv1.ActivityTopResponse, error) {
+	f.got = r
+	return &dbperfv1.ActivityTopResponse{MatchedRows: 42, TotalAas: 1, NSamples: 10, Level: "raw"}, nil
+}
+func TestTableFilterWireContract(t *testing.T) {
+	f := &fakeTop{}
+	var ts dbperfv1.TargetServiceServer = &fakeTargets{}
+	var as dbperfv1.ActivityServiceServer = f
+	mux := newMux(&ts, &as)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/activity/top", strings.NewReader(`{"targetId":1,"range":{"startUnix":1700000000,"endUnix":1700000300},"slicing":{"dimension":"DATNAME","limit":8},"tableFilters":[{"dimension":"QUERY","match":"MATCH_CONTAINS","values":["orders"],"exclude":true}],"aas":{"min":0},"percent":{"max":50},"pageSize":8,"offset":8}`)))
+	if rr.Code != 200 {
+		t.Fatalf("%d %s", rr.Code, rr.Body)
+	}
+	if f.got.GetAas().Min == nil || *f.got.GetAas().Min != 0 || f.got.GetAas().Max != nil || f.got.GetPercent().GetMax() != 50 || f.got.GetOffset() != 8 || f.got.GetPageSize() != 8 {
+		t.Fatalf("optional/pagination contract: %+v", f.got)
+	}
+	filter := f.got.GetTableFilters()[0]
+	if filter.GetMatch() != dbperfv1.FilterMatch_MATCH_CONTAINS || !filter.GetExclude() || filter.GetDimension() != dbperfv1.Dimension_QUERY {
+		t.Fatalf("filter: %+v", filter)
+	}
+	compact := strings.NewReplacer(" ", "", "\n", "").Replace(rr.Body.String())
+	if !strings.Contains(compact, `"matchedRows":"42"`) {
+		t.Fatal(compact)
+	}
+}
