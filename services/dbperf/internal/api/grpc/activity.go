@@ -51,6 +51,9 @@ func (s *activityServer) GetActivityTop(ctx context.Context, req *dbperfv1.Activ
 		return nil, status.Error(codes.InvalidArgument, "slicing is required")
 	}
 	q := query.TopRequest{
+		TableFilters: toFilters(req.GetTableFilters()),
+		AAS:          toMetric(req.GetAas()), Percent: toMetric(req.GetPercent()),
+		PageSize: int(req.GetPageSize()), Offset: int(req.GetOffset()),
 		TargetID:    req.GetTargetId(),
 		Range:       toRange(req.GetRange()),
 		Slicing:     toTop(req.GetSlicing()),
@@ -65,7 +68,7 @@ func (s *activityServer) GetActivityTop(ctx context.Context, req *dbperfv1.Activ
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out := &dbperfv1.ActivityTopResponse{TotalAas: res.TotalAAS, NSamples: res.NSamples}
+	out := &dbperfv1.ActivityTopResponse{TotalAas: res.TotalAAS, NSamples: res.NSamples, MatchedRows: res.MatchedRows, Level: res.Level}
 	for _, e := range res.Entries {
 		out.Entries = append(out.Entries, toEntry(e))
 	}
@@ -179,7 +182,7 @@ func toTop(t *dbperfv1.TopSlicing) query.TopSlicing {
 func toFilters(fs []*dbperfv1.Filter) []query.Filter {
 	out := make([]query.Filter, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, query.Filter{Dim: query.Dimension(f.GetDimension()), Values: f.GetValues(), Exclude: f.GetExclude()})
+		out = append(out, query.Filter{Dim: query.Dimension(f.GetDimension()), Values: f.GetValues(), Exclude: f.GetExclude(), Match: int(f.GetMatch())})
 	}
 	return out
 }
@@ -209,4 +212,11 @@ func unixOrZero(t time.Time) int64 {
 		return 0
 	}
 	return t.Unix()
+}
+
+func toMetric(r *dbperfv1.MetricRange) *query.MetricRange {
+	if r == nil {
+		return nil
+	}
+	return &query.MetricRange{Min: r.Min, Max: r.Max}
 }

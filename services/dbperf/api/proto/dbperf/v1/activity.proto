@@ -46,10 +46,17 @@ message TimeRange {
   int64 end_unix = 2;   // exclusive
 }
 
+enum FilterMatch {
+  MATCH_VALUES = 0;
+  MATCH_CONTAINS = 1; // literal, case-insensitive substring; QUERY searches full SQL
+  MATCH_TEXT_EQUALS = 2;
+}
+
 message Filter {
   Dimension dimension = 1;
   repeated string values = 2; // OR inside a filter, AND between filters
-  bool exclude = 3;           // NOT IN
+  bool exclude = 3;           // negate the match
+  FilterMatch match = 4;
 }
 
 message TopSlicing {
@@ -89,6 +96,11 @@ message ActivityTimeSeriesResponse {
   repeated Series series = 6; // top-N + remainder
 }
 
+message MetricRange {
+  optional double min = 1;
+  optional double max = 2;
+}
+
 message ActivityTopRequest {
   uint32 target_id = 1;
   TimeRange range = 2;
@@ -96,6 +108,11 @@ message ActivityTopRequest {
   TopSlicing sub_slicing = 4; // nested slice, e.g. WAIT_EVENT_TYPE limit 10; optional
   repeated Filter filters = 5;
   bool exclude_self = 6;
+  repeated Filter table_filters = 7; // before GROUP BY, table only
+  MetricRange aas = 8; // after grouping, before pagination
+  MetricRange percent = 9; // denominator before metric predicates
+  int32 page_size = 10; // 1..100 enables paging, without remainder
+  int32 offset = 11;
 }
 
 message TopEntry {
@@ -108,7 +125,9 @@ message TopEntry {
 message ActivityTopResponse {
   double total_aas = 1;
   int64 n_samples = 2;
-  repeated TopEntry entries = 3; // top-N + remainder
+  repeated TopEntry entries = 3; // top-N + remainder, or a page
+  uint64 matched_rows = 4;
+  string level = 5;
 }
 
 message ActivityTotalsRequest {
