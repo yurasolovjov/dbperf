@@ -330,7 +330,10 @@ for (const size of [
   { width: 1024, height: 768 },
   { width: 1280, height: 800 },
   { width: 1366, height: 768 },
+  { width: 1440, height: 840 },
   { width: 1440, height: 900 },
+  { width: 1440, height: 960 },
+  { width: 1440, height: 961 },
   { width: 1920, height: 1080 },
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
@@ -345,7 +348,7 @@ for (const size of [
       ),
     ).toBe(true)
     await page.screenshot({
-      path: `test-results/focus-${size.width}.png`,
+      path: `test-results/focus-${size.width}x${size.height}.png`,
       fullPage: true,
     })
     if (size.width >= 1024) {
@@ -353,7 +356,7 @@ for (const size of [
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(size.height)
     }
     await page.screenshot({
-      path: `test-results/focus-${size.width}.png`,
+      path: `test-results/focus-${size.width}x${size.height}.png`,
       fullPage: true,
     })
   })

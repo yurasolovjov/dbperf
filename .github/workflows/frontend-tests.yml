@@ -30,10 +30,19 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run test:coverage
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage
           path: services/dbperf-ui/coverage/
+          if-no-files-found: warn
+      - name: Upload browser test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-browser-results
+          path: services/dbperf-ui/test-results/
           if-no-files-found: warn
