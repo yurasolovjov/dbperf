@@ -10,7 +10,7 @@ import { TopBar } from '../components/TopBar'
 import { TopTable, type Unit } from '../components/TopTable'
 import type { ChartMode } from '../components/activity/chart-interpolation'
 import { BrushChart } from '../components/activity/brush-chart'
-import { ProfileView } from '../components/activity/profile-view'
+import { FlameGraph } from '../components/activity/flame-graph'
 import {
   FULL,
   rangeLabel,
@@ -54,12 +54,13 @@ export function ActivityPage({
   const [unit, setUnit] = useState<Unit>('PERCENT'),
     [queryHash, setQueryHash] = useState<string | null>(null)
   const [chartMode, setChartMode] = useState<ChartMode>('smooth')
-  const [view, setView] = useState<'chart' | 'profile'>('chart')
+  const [view, setView] = useState<'flame' | 'chart'>('flame')
   const [profileOrder, setProfileOrder] = useState<Dimension[]>([
-    'QUERY',
     'DATNAME',
+    'QUERY',
     'WAIT_EVENT_TYPE',
     'WAIT_EVENT',
+    'APPLICATION_NAME',
   ])
   const range = useMemo(
     () => ({
@@ -163,7 +164,7 @@ export function ActivityPage({
   )
   const profile = useApi(
     (s) =>
-      targetId && view === 'profile'
+      targetId && view === 'flame'
         ? api.profile(
             {
               targetId,
@@ -316,7 +317,7 @@ export function ActivityPage({
         overview.error,
         detail.error,
         totals.error,
-        view === 'profile' ? profile.error : null,
+        view === 'flame' ? profile.error : null,
       ].filter(Boolean),
     ),
   ]
@@ -519,17 +520,19 @@ export function ActivityPage({
               >
                 <button
                   type="button"
-                  className={`btn small ${view === 'chart' ? 'active' : ''}`}
-                  onClick={() => setView('chart')}
+                  className={`btn small ${view === 'flame' ? 'active' : ''}`}
+                  aria-pressed={view === 'flame'}
+                  onClick={() => setView('flame')}
                 >
-                  График
+                  Flame graph
                 </button>
                 <button
                   type="button"
-                  className={`btn small ${view === 'profile' ? 'active' : ''}`}
-                  onClick={() => setView('profile')}
+                  className={`btn small ${view === 'chart' ? 'active' : ''}`}
+                  aria-pressed={view === 'chart'}
+                  onClick={() => setView('chart')}
                 >
-                  Профиль
+                  График
                 </button>
               </div>
             </div>
@@ -558,17 +561,18 @@ export function ActivityPage({
               ))}
             </div>
           </div>
-          {view === 'profile' ? (
+          {view === 'flame' ? (
             <>
               <DimensionOrder
                 order={profileOrder}
                 onChange={setProfileOrder}
                 rawLevel={rawLevel}
               />
-              <ProfileView
+              <FlameGraph
                 key={profileOrder.join(',')}
                 data={profile.data}
                 dimensions={profileOrder}
+                loading={profile.loading}
                 onQuery={setQueryHash}
                 onFilter={addFilter}
               />

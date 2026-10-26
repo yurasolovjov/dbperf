@@ -6,12 +6,11 @@ import type { TableFilters } from '../../api/types'
 import { ColumnFilter } from './column-filter'
 import { DesignedSelect } from './designed-select'
 import { BrushChart } from './brush-chart'
-import { ProfileView } from './profile-view'
 import { Controls } from '../Controls'
 import { DimensionOrder } from '../DimensionOrder'
 import { FiltersBar } from '../FiltersBar'
 import { TopTable } from '../TopTable'
-import { series, top, profile, slice } from '../../test/fixtures'
+import { series, top, slice } from '../../test/fixtures'
 const noop=()=>{}
 it('table dispatches tabs, units, expansion, filters, SQL and pagination',()=>{
  const props={dimension:'QUERY' as const,onDimension:vi.fn(),data:top,error:null,loading:false,unit:'PERCENT' as 'PERCENT'|'AAS',onUnit:vi.fn(),onFilter:vi.fn(),onQueryText:vi.fn(),rawLevel:true,filters:{dimensions:[]} as TableFilters,onFilters:vi.fn(),offset:8,onOffset:vi.fn(),pageSize:8}
@@ -91,21 +90,6 @@ it('legacy filter bar handles empty state and all actions',()=>{
  const props={filters:[],onRemove:vi.fn(),onClear:vi.fn(),totalOnly:false,onTotalOnly:vi.fn(),background:false,onBackground:vi.fn(),expanded:false,onExpand:vi.fn()}
  const{rerender}=render(<FiltersBar {...props}/>);expect(screen.getByText('Фильтры не выбраны')).toBeVisible();fireEvent.click(screen.getByLabelText('Фоновые процессы'));fireEvent.click(screen.getByLabelText('Общая активность'));fireEvent.click(screen.getByRole('button',{name:'Развернуть график'}));expect(props.onExpand).toHaveBeenCalled()
  rerender(<FiltersBar {...props} filters={[{dimension:'BACKEND_TYPE',values:['a'],exclude:true},{dimension:'QUERY',values:['b']}]} expanded/>);fireEvent.click(screen.getAllByRole('button',{name:'Убрать фильтр'})[0]);fireEvent.click(screen.getByText('сбросить'));expect(props.onRemove).toHaveBeenCalledWith(0);expect(props.onClear).toHaveBeenCalled()
-})
-it('profile browses hierarchy, filters leaves, opens SQL, and resets breadcrumbs',()=>{
- const onFilter=vi.fn(),onQuery=vi.fn(),{rerender,container}=render(<ProfileView data={profile} dimensions={['QUERY','DATNAME','WAIT_EVENT_TYPE','WAIT_EVENT']} onFilter={onFilter} onQuery={onQuery}/>);
- fireEvent.click(screen.getByRole('button',{name:/SELECT orders 50/}));expect(onQuery).toHaveBeenCalledWith('123')
- fireEvent.click(screen.getByRole('button',{name:'В фильтры: 123'}));expect(onFilter).toHaveBeenCalledWith('QUERY','123')
- fireEvent.click(screen.getByRole('button',{name:'Раскрыть запрос 123'}));fireEvent.click(container.querySelector('.profile-node-main')!);fireEvent.click(container.querySelector('.profile-node-main')!);fireEvent.click(container.querySelector('.profile-node-main')!);expect(onFilter).toHaveBeenCalledWith('WAIT_EVENT','CPU')
- fireEvent.click(screen.getByRole('button',{name:/\/ SELECT orders/}));fireEvent.click(screen.getByRole('button',{name:'Вся активность'}));expect(screen.getByText(/За пределами/)).toBeVisible()
- rerender(<ProfileView data={{...profile,paths:[]}} dimensions={[]} onFilter={onFilter} onQuery={onQuery}/>);expect(screen.getByText(/Конец профиля/)).toBeVisible()
- rerender(<ProfileView data={null} dimensions={['QUERY']} onFilter={onFilter} onQuery={onQuery}/>);expect(screen.getByText(/Нет активности/)).toBeVisible()
-})
-it('profile paginates large query lists and handles data changing under breadcrumbs',()=>{
- const many={...profile,totalSamples:120,paths:Array.from({length:120},(_,i)=>({values:[String(i),''],samples:1})),queryShortTexts:{}}
- const {container,rerender}=render(<ProfileView data={many} dimensions={['QUERY','DATNAME']} onFilter={noop} onQuery={noop}/>);expect(container.querySelectorAll('.profile-node')).toHaveLength(100);fireEvent.click(screen.getByRole('button',{name:/Показать ещё/}));expect(container.querySelectorAll('.profile-node')).toHaveLength(120)
- fireEvent.click(screen.getByRole('button',{name:'Раскрыть запрос 0'}));expect(screen.getByRole('button',{name:/\(пусто\)/})).toBeVisible()
- rerender(<ProfileView data={profile} dimensions={['QUERY','DATNAME']} onFilter={noop} onQuery={noop}/>);expect(container.querySelectorAll('.profile-node').length).toBeGreaterThan(0)
 })
 it('brush moves/resizes by keyboard and pointer, cancels drag and reports hover',()=>{
  const onChange=vi.fn(),props={data:series,range:series.range,selection:{start:.2,end:.8},onChange,dimension:'WAIT_EVENT_TYPE' as const,label:'Test'}
